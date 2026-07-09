@@ -153,7 +153,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             # TODO: Mark sensors as available
 
-        except (AioComfoConnectNotConnected, AioComfoConnectTimeout):
+        except AioComfoConnectNotConnected, AioComfoConnectTimeout:
             # Reconnect when connection has been dropped
             try:
                 await bridge.connect(entry.data[CONF_LOCAL_UUID])
