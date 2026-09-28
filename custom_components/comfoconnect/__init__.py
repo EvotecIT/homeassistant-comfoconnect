@@ -212,8 +212,12 @@ class ComfoConnectBridge(ComfoConnect):
     @callback
     def alarm_callback(self, node_id, errors):
         """Handle alarm updates."""
+        if self.active_alarm_node_id == node_id and self.active_alarms == errors:
+            return
+
         self.active_alarm_node_id = node_id
-        self.active_alarms = errors
+        self.active_alarms = errors.copy()
+        errors = self.active_alarms
 
         event_data = {
             "bridge_uuid": self.uuid,

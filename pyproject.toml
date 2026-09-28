@@ -12,7 +12,11 @@ aiocomfoconnect = "0.1.15"
 
 [tool.poetry.group.dev.dependencies]
 homeassistant = "^2024.11.0b1"
+pytest = "^8.3"
 ruff = "^0.5.2"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["poetry-core"]
@@ -71,3 +75,6 @@ extend-select = [
     "T20",
     "W",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["S101"]
