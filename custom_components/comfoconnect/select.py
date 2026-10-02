@@ -332,5 +332,12 @@ class ComfoConnectSelect(SelectEntity):
     async def async_select_option(self, option: str) -> None:
         """Set the selected option."""
         await self.entity_description.set_value_fn(self._ccb, option)
-        self._attr_current_option = option
+        if TIMER_ACTIVE in self.entity_description.options:
+            if option == TIMER_ACTIVE:
+                # Active only reports status; selecting it must not invent a timer.
+                self._attr_current_option = await self.entity_description.get_value_fn(self._ccb)
+            else:
+                self._attr_current_option = TIMER_OFF if option == TIMER_OFF else TIMER_ACTIVE
+        else:
+            self._attr_current_option = option
         self.async_write_ha_state()

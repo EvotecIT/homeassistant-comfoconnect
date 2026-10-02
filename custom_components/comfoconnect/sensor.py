@@ -490,7 +490,6 @@ SENSOR_TYPES = (
         ccb_sensor=SENSORS.get(SENSOR_AVOIDED_HEATING),
         entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
-        mapping=lambda x: x / 100,
         throttle=True,
     ),
     ComfoconnectSensorEntityDescription(
@@ -524,7 +523,6 @@ SENSOR_TYPES = (
         ccb_sensor=SENSORS.get(SENSOR_AVOIDED_COOLING),
         entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
-        mapping=lambda x: x / 100,
         throttle=True,
     ),
     ComfoconnectSensorEntityDescription(
