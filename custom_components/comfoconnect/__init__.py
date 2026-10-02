@@ -8,6 +8,7 @@ from datetime import timedelta
 from aiocomfoconnect import ComfoConnect, discover_bridges
 from aiocomfoconnect.exceptions import (
     AioComfoConnectNotConnected,
+    AioComfoConnectNotReachable,
     AioComfoConnectTimeout,
     ComfoConnectError,
     ComfoConnectNotAllowed,
@@ -19,6 +20,7 @@ from aiocomfoconnect.properties import (
 )
 from aiocomfoconnect.sensors import Sensor
 from aiocomfoconnect.util import version_decode
+from homeassistant.components import network
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.const import CONF_HOST, EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant, callback
@@ -28,7 +30,7 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
 )
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.dispatcher import dispatcher_send
+from homeassistant.helpers.dispatcher import async_dispatcher_send, dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
 
@@ -46,6 +48,7 @@ PLATFORMS: list[Platform] = [
 _LOGGER = logging.getLogger(__name__)
 
 SIGNAL_COMFOCONNECT_UPDATE_RECEIVED = "comfoconnect_update_{}_{}"
+SIGNAL_COMFOCONNECT_AVAILABILITY = "comfoconnect_availability_{}"
 
 KEEP_ALIVE_INTERVAL = timedelta(seconds=30)
 
@@ -78,14 +81,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except ComfoConnectError as err:
         raise ConfigEntryError from err
 
-    except AioComfoConnectTimeout as err:
-        # We got a timeout, this can happen when the IP address of the bridge has changed.
+    except (AioComfoConnectTimeout, AioComfoConnectNotReachable) as err:
+        # We can't reach the bridge, this can happen when the IP address of the bridge has changed.
         _LOGGER.warning(
-            'Timeout connecting to bridge "%s", trying discovery again.',
+            'Could not connect to bridge "%s", trying discovery again.',
             entry.data[CONF_HOST],
         )
 
-        bridges = await discover_bridges()
+        broadcast_addresses = await network.async_get_ipv4_broadcast_addresses(hass)
+        bridges = await discover_bridges(broadcast_addresses=broadcast_addresses)
         discovered_bridge = next((b for b in bridges if b.uuid == entry.data[CONF_UUID]), None)
         if not discovered_bridge:
             _LOGGER.warning('Unable to discover bridge "%s". Retrying later.', entry.data[CONF_UUID])
@@ -145,17 +149,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             # Use cmd_time_request as a keepalive since cmd_keepalive doesn't send back a reply we can wait for
             await bridge.cmd_time_request()
+            bridge.set_available(True)
 
-            # TODO: Mark sensors as available
-
-        except (AioComfoConnectNotConnected, AioComfoConnectTimeout):
+        except (AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable):
+            bridge.set_available(False)
             # Reconnect when connection has been dropped
             try:
                 await bridge.connect(entry.data[CONF_LOCAL_UUID])
-            except AioComfoConnectTimeout:
-                _LOGGER.debug("Connection timed out. Retrying later...")
-
-                # TODO: Mark all sensors as unavailable
+                bridge.set_available(True)
+            except (AioComfoConnectTimeout, AioComfoConnectNotReachable):
+                _LOGGER.debug("Could not connect to the bridge. Retrying later...")
 
     entry.async_on_unload(async_track_time_interval(hass, send_keepalive, KEEP_ALIVE_INTERVAL))
 
@@ -192,6 +195,16 @@ class ComfoConnectBridge(ComfoConnect):
             self.alarm_callback,
         )
         self.hass = hass
+        self.is_available = True
+
+    @callback
+    def set_available(self, available: bool) -> None:
+        """Update bridge availability and notify entities via dispatcher."""
+        if self.is_available == available:
+            return
+        self.is_available = available
+        _LOGGER.info("Bridge %s availability changed: %s", self.uuid, available)
+        async_dispatcher_send(self.hass, SIGNAL_COMFOCONNECT_AVAILABILITY.format(self.uuid), available)
 
     @callback
     def sensor_callback(self, sensor: Sensor, value):
