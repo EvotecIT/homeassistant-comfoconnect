@@ -24,12 +24,15 @@ This integration supports the following additional features over the existing in
 * Support for multiple bridges
 * Allows to modify the balance mode, bypass mode, temperature profile and ventilation mode
 * Allows advanced airflow and temperature target tuning through disabled-by-default number entities
-* Changes to fan speed won't be reverted after 2 hours
 * Support to clear alarms
 * Ignores invalid sensor values at the beginning of a session (Workaround for bridge firmware bug)
 * Throttles high frequency sensor updates (airflow & fan duty) to once every 10 seconds
 
 **Note: Not all sensors are enabled by default. You can enable them on the integration page.**
+
+### Fan speed overrides
+
+With aiocomfoconnect 0.2.1, a temporary fan-speed override can remain active after selecting `auto` until the unit's timer expires.
 
 ### Timed boost and away modes
 
