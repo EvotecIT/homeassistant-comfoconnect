@@ -92,6 +92,98 @@ def test_acknowledged_write_is_published_even_when_followup_read_fails(tmp_path,
     asyncio.run(scenario())
 
 
+def test_acknowledged_write_survives_an_immediate_old_readback(tmp_path):
+    """A unit can acknowledge a write before its property read reflects the value."""
+
+    async def scenario():
+        hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
+        bridge, entity = number_entity(hass)
+        await entity.async_update()
+        await entity.async_set_native_value(90)
+        await entity.async_update()
+        entity.async_write_ha_state()
+        assert hass.states.get(entity.entity_id).state == "90.0"
+
+        bridge.get_single_property.return_value = 90
+        await entity.async_update()
+        bridge.get_single_property.return_value = 85
+        await entity.async_update()
+        entity.async_write_ha_state()
+        assert hass.states.get(entity.entity_id).state == "85.0"
+
+    asyncio.run(scenario())
+
+
+def test_a_read_started_before_a_write_cannot_undo_a_confirmed_value(tmp_path):
+    """An older poll may finish after a write and a newer confirming read."""
+
+    async def scenario():
+        hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
+        bridge, entity = number_entity(hass)
+        await entity.async_update()
+        old_read = hass.loop.create_future()
+        read_started = asyncio.Event()
+
+        async def delayed_read(*args):
+            read_started.set()
+            return await old_read
+
+        bridge.get_single_property.side_effect = delayed_read
+        pending_update = asyncio.create_task(entity.async_update())
+        await read_started.wait()
+        await entity.async_set_native_value(90)
+        bridge.get_single_property.side_effect = None
+        bridge.get_single_property.return_value = 90
+        await entity.async_update()
+        old_read.set_result(85)
+        await pending_update
+        entity.async_write_ha_state()
+        assert hass.states.get(entity.entity_id).state == "90.0"
+
+    asyncio.run(scenario())
+
+
+def test_successive_writes_retain_the_latest_acknowledged_value(tmp_path):
+    """A delayed read of either earlier value cannot undo the latest write."""
+
+    async def scenario():
+        hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
+        bridge, entity = number_entity(hass)
+        await entity.async_update()
+        await entity.async_set_native_value(90)
+        await entity.async_set_native_value(95)
+        for old_value in (85, 90):
+            bridge.get_single_property.return_value = old_value
+            await entity.async_update()
+            entity.async_write_ha_state()
+            assert hass.states.get(entity.entity_id).state == "95.0"
+
+    asyncio.run(scenario())
+
+
+def test_old_readback_is_used_after_the_write_grace_expires(tmp_path):
+    """A unit that ignores or clamps a write must eventually report its real value."""
+
+    async def scenario():
+        hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
+        bridge, entity = number_entity(hass)
+        await entity.async_update()
+        with patch("custom_components.comfoconnect.number.monotonic", return_value=100) as clock:
+            await entity.async_set_native_value(90)
+            await entity.async_update()
+            assert entity.native_value == 90
+            clock.return_value = 106
+            await entity.async_update()
+            entity.async_write_ha_state()
+            assert hass.states.get(entity.entity_id).state == "85.0"
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("key,mode", [("boost_timeout", "boost"), ("away_timeout", "away")])
 def test_timer_select_reports_active_without_starting_a_timer_for_the_status_option(tmp_path, key, mode):
     """Duration starts a timer, while Active reflects the device's existing state."""

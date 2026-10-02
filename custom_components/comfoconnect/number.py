@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from time import monotonic
 
 from aiocomfoconnect.const import (
     UNIT_TEMPHUMCONTROL,
@@ -32,6 +33,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PROPERTY_RANGE = 0x20
 PROPERTY_STEP = 0x40
+WRITE_READBACK_GRACE_SECONDS = 5
 
 
 @dataclass
@@ -195,6 +197,8 @@ class ComfoConnectNumber(NumberEntity):
         """Initialize the ComfoConnect number."""
         self._ccb = ccb
         self._constraints_generation: int | None = None
+        self._write_revision = 0
+        self._write_readback_grace: tuple[set[float], int, float] | None = None
         self._attr_available = False
         self.entity_description = description
         self._attr_unique_id = f"{self._ccb.uuid}-{description.key}"
@@ -222,6 +226,7 @@ class ComfoConnectNumber(NumberEntity):
         """Invalidate constraints on disconnect and wait for a successful poll."""
         if not available:
             self._constraints_generation = None
+            self._write_readback_grace = None
         self._attr_available = available and self._constraints_generation == self._ccb.connection_generation
         self.async_write_ha_state()
 
@@ -233,6 +238,7 @@ class ComfoConnectNumber(NumberEntity):
 
         try:
             generation = self._ccb.connection_generation
+            write_revision = self._write_revision
             value = await self._ccb.get_single_property(
                 self.entity_description.unit,
                 self.entity_description.subunit,
@@ -248,7 +254,20 @@ class ComfoConnectNumber(NumberEntity):
             _LOGGER.warning("Could not update %s; keeping the last value: %s", self.entity_description.name, err)
             return
 
-        self._attr_native_value = self._decode_value(value)
+        if write_revision != self._write_revision:
+            # A read started before an acknowledged write cannot replace that write.
+            return
+
+        native_value = self._decode_value(value)
+        if self._write_readback_grace is not None:
+            stale_values, write_generation, deadline = self._write_readback_grace
+            if generation == write_generation and monotonic() < deadline and native_value in stale_values:
+                # The unit can briefly return an earlier value after acknowledging a write.
+                self._attr_available = True
+                return
+            self._write_readback_grace = None
+
+        self._attr_native_value = native_value
         self._attr_available = True
 
     async def async_set_native_value(self, value: float) -> None:
@@ -257,6 +276,8 @@ class ComfoConnectNumber(NumberEntity):
             raise HomeAssistantError("The number is unavailable until its value and constraints have been read")
 
         encoded_value = round(value * self.entity_description.scale)
+        previous_value = self.native_value
+        generation = self._ccb.connection_generation
 
         if self.entity_description.speed:
             await self._ccb.set_flow_for_speed(self.entity_description.speed, encoded_value)
@@ -269,7 +290,19 @@ class ComfoConnectNumber(NumberEntity):
                 self.entity_description.property_type,
             )
 
+        now = monotonic()
+        stale_values: set[float] = set()
+        if self._write_readback_grace is not None:
+            previous_stale_values, write_generation, deadline = self._write_readback_grace
+            if generation == write_generation and now < deadline:
+                stale_values.update(previous_stale_values)
+        for earlier_value in (previous_value, self.native_value):
+            if earlier_value is not None:
+                stale_values.add(earlier_value)
         self._attr_native_value = self._decode_value(encoded_value)
+        stale_values.discard(self._attr_native_value)
+        self._write_readback_grace = (stale_values, generation, now + WRITE_READBACK_GRACE_SECONDS) if stale_values else None
+        self._write_revision += 1
         self.async_write_ha_state()
 
     async def _update_constraints(self) -> None:
