@@ -4,6 +4,8 @@
 
 This is a custom integration for Home Assistant to integrate with the Zehnder ComfoAirQ ventilation system. It's using the [aiocomfoconnect](https://github.com/michaelarnauts/aiocomfoconnect) library.
 
+This EvotecIT fork combines alarm notifications with advanced controls and diagnostics on `master`. The changes are also maintained as separate upstream contributions: [alarm notifications](https://github.com/michaelarnauts/home-assistant-comfoconnect/pull/151) and [advanced controls](https://github.com/michaelarnauts/home-assistant-comfoconnect/pull/152).
+
 This custom integration is an upgrade over the existing `comfoconnect` integration and is meant for testing purposes. The goal is eventually to replace the existing `comfoconnect`
 integration in Home Assistant.
 
@@ -51,7 +53,7 @@ Changing an airflow target overwrites the installer's commissioned airflow setti
 
 The easiest way to install this integration is through [HACS](https://hacs.xyz/).
 
-1. Add this repository (`https://github.com/michaelarnauts/home-assistant-comfoconnect`) as a custom repository in HACS.
+1. Add this repository (`https://github.com/EvotecIT/homeassistant-comfoconnect`) as a custom repository in HACS.
    See [here](https://hacs.xyz/docs/faq/custom_repositories) for more information.
 2. Install the `Zehnder ComfoAirQ` integration.
 3. Restart Home Assistant.
