@@ -145,20 +145,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     @callback
     async def send_keepalive(now) -> None:
         """Send keepalive to the bridge."""
-        _LOGGER.debug("Sending keepalive...")
-        try:
-            # Use cmd_time_request as a keepalive since cmd_keepalive doesn't send back a reply we can wait for
-            await bridge.cmd_time_request()
-            bridge.set_available(True)
-
-        except (AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable):
-            bridge.set_available(False)
-            # Reconnect when connection has been dropped
-            try:
-                await bridge.connect(entry.data[CONF_LOCAL_UUID])
-                bridge.set_available(True)
-            except (AioComfoConnectTimeout, AioComfoConnectNotReachable):
-                _LOGGER.debug("Could not connect to the bridge. Retrying later...")
+        await bridge.async_keepalive(entry.data[CONF_LOCAL_UUID])
 
     entry.async_on_unload(async_track_time_interval(hass, send_keepalive, KEEP_ALIVE_INTERVAL))
 
@@ -196,6 +183,30 @@ class ComfoConnectBridge(ComfoConnect):
         )
         self.hass = hass
         self.is_available = True
+        self.connection_generation = 0
+
+    async def cmd_start_session(self, take_over: bool = False):
+        """Track acknowledged sessions, including the library's automatic reconnects."""
+        result = await super().cmd_start_session(take_over)
+        self.connection_generation += 1
+        return result
+
+    async def async_keepalive(self, local_uuid: str) -> None:
+        """Restore availability only after receiving a reply from the bridge."""
+        _LOGGER.debug("Sending keepalive...")
+        try:
+            # cmd_keepalive has no response; cmd_time_request proves the bridge is reachable.
+            await self.cmd_time_request()
+        except (AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable):
+            self.set_available(False)
+            try:
+                # connect() may return while the library is still retrying in the background.
+                await self.connect(local_uuid)
+                await self.cmd_time_request()
+            except (AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable):
+                _LOGGER.debug("Could not connect to the bridge. Retrying later...")
+                return
+        self.set_available(True)
 
     @callback
     def set_available(self, available: bool) -> None:
