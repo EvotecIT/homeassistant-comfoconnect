@@ -214,6 +214,7 @@ class ComfoConnectAlarmBinarySensor(BinarySensorEntity):
             "alarms": [{"id": error_id, "message": error} for error_id, error in self._errors.items()],
         }
 
+    @callback
     def _handle_update(self, node_id: int, errors: dict[int, str]) -> None:
         """Handle alarm update callbacks."""
         self._node_id = node_id
