@@ -2,18 +2,19 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from aiocomfoconnect.exceptions import AioComfoConnectTimeout, ComfoConnectRmiError
 from aiocomfoconnect.sensors import SENSOR_AVOIDED_COOLING, SENSOR_AVOIDED_HEATING
-from custom_components.comfoconnect import SIGNAL_COMFOCONNECT_AVAILABILITY
+from custom_components.comfoconnect import SIGNAL_COMFOCONNECT_AVAILABILITY, ComfoConnectBridge
 from custom_components.comfoconnect.number import NUMBER_TYPES, ComfoConnectNumber
 from custom_components.comfoconnect.select import SELECT_TYPES, ComfoConnectSelect
 from custom_components.comfoconnect.sensor import SENSOR_TYPES, ComfoConnectSensor
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.loader import async_setup as setup_loader
 
 
 def metadata(*values):
@@ -23,19 +24,41 @@ def metadata(*values):
 
 def number_entity(hass, key="airflow_away"):
     """Create an entity with mocked device I/O and a real HA state machine."""
-    bridge = SimpleNamespace(
-        uuid="test-bridge",
-        is_available=True,
-        get_single_property=AsyncMock(return_value=85),
-        cmd_rmi_request=AsyncMock(side_effect=[metadata(50, 140), metadata(5)]),
-        set_flow_for_speed=AsyncMock(),
-        set_property_typed=AsyncMock(),
-    )
+    bridge = ComfoConnectBridge(hass, "127.0.0.1", "test-bridge")
+    bridge.get_single_property = AsyncMock(return_value=85)
+    bridge.cmd_rmi_request = AsyncMock(side_effect=[metadata(50, 140), metadata(5)])
+    bridge.set_flow_for_speed = AsyncMock()
+    bridge.set_property_typed = AsyncMock()
     description = next(description for description in NUMBER_TYPES if description.key == key)
     entity = ComfoConnectNumber(bridge, SimpleNamespace(), description)
     entity.hass = hass
     entity.entity_id = f"number.{key}"
     return bridge, entity
+
+
+def test_short_automatic_reconnect_reloads_constraints_without_availability_signals(tmp_path):
+    """A new session invalidates cached write limits even between keepalive ticks."""
+
+    async def scenario():
+        hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
+        bridge, entity = number_entity(hass)
+        await entity.async_update()
+        assert entity.available
+
+        with patch("aiocomfoconnect.bridge.Bridge._send", new=AsyncMock()):
+            await bridge.cmd_start_session(True)
+        assert not entity.available
+        with pytest.raises(HomeAssistantError):
+            await entity.async_set_native_value(90)
+        bridge.set_flow_for_speed.assert_not_awaited()
+
+        bridge.cmd_rmi_request.side_effect = [metadata(50, 150), metadata(10)]
+        await entity.async_update()
+        assert entity.available
+        assert (entity.native_min_value, entity.native_max_value, entity.native_step) == (50, 150, 10)
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("read_error", [ComfoConnectRmiError("Busy"), AioComfoConnectTimeout("Timed out")])
@@ -44,6 +67,7 @@ def test_acknowledged_write_is_published_even_when_followup_read_fails(tmp_path,
 
     async def scenario():
         hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
         bridge, entity = number_entity(hass)
         await entity.async_update()
         entity.async_write_ha_state()
@@ -74,6 +98,7 @@ def test_timer_select_reports_active_without_starting_a_timer_for_the_status_opt
 
     async def scenario():
         hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
         setter = AsyncMock()
         getter = AsyncMock(return_value=False)
         bridge = SimpleNamespace(uuid="test-bridge", is_available=True)
@@ -96,6 +121,12 @@ def test_timer_select_reports_active_without_starting_a_timer_for_the_status_opt
         assert setter.await_args.args == (False,)
         assert hass.states.get(entity.entity_id).state == "Off"
 
+        if mode == "away":
+            assert "7 Days" in entity.options
+            await entity.async_select_option("7 Days")
+            assert setter.await_args.args == (True, 604800)
+            assert hass.states.get(entity.entity_id).state == "Active"
+
     asyncio.run(scenario())
 
 
@@ -104,6 +135,7 @@ def test_metadata_failure_is_retried_and_constraints_reload_after_reconnect(tmp_
 
     async def scenario():
         hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
         bridge, entity = number_entity(hass)
         await entity.async_added_to_hass()
         bridge.cmd_rmi_request.side_effect = [metadata(50, 140), ComfoConnectRmiError("Busy")]
@@ -147,6 +179,7 @@ def test_invalid_device_constraints_do_not_enable_writes(tmp_path, range_respons
 
     async def scenario():
         hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
         bridge, entity = number_entity(hass)
         bridge.cmd_rmi_request.side_effect = [range_response, step_response]
         await entity.async_update()
@@ -163,6 +196,7 @@ def test_failed_write_keeps_previous_state_and_temperature_writes_use_device_sca
 
     async def scenario():
         hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
         bridge, entity = number_entity(hass, "rmot_heating")
         bridge.get_single_property.return_value = 110
         bridge.cmd_rmi_request.side_effect = [metadata(0, 150), metadata(10)]
@@ -188,6 +222,7 @@ def test_avoided_power_preserves_watts_from_the_library(tmp_path, sensor_id):
 
     async def scenario():
         hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
         bridge = SimpleNamespace(uuid="test-bridge", is_available=True)
         description = next(description for description in SENSOR_TYPES if description.key == sensor_id)
         entity = ComfoConnectSensor(bridge, SimpleNamespace(), description)

@@ -194,7 +194,7 @@ class ComfoConnectNumber(NumberEntity):
     ) -> None:
         """Initialize the ComfoConnect number."""
         self._ccb = ccb
-        self._constraints_loaded = False
+        self._constraints_generation: int | None = None
         self._attr_available = False
         self.entity_description = description
         self._attr_unique_id = f"{self._ccb.uuid}-{description.key}"
@@ -212,12 +212,17 @@ class ComfoConnectNumber(NumberEntity):
             )
         )
 
+    @property
+    def available(self) -> bool:
+        """Use constraints only from the bridge's current acknowledged session."""
+        return self._attr_available and self._ccb.is_available and self._constraints_generation == self._ccb.connection_generation
+
     @callback
     def _handle_availability_update(self, available: bool) -> None:
         """Invalidate constraints on disconnect and wait for a successful poll."""
         if not available:
-            self._constraints_loaded = False
-        self._attr_available = available and self._constraints_loaded
+            self._constraints_generation = None
+        self._attr_available = available and self._constraints_generation == self._ccb.connection_generation
         self.async_write_ha_state()
 
     async def async_update(self) -> None:
@@ -227,16 +232,19 @@ class ComfoConnectNumber(NumberEntity):
             return
 
         try:
+            generation = self._ccb.connection_generation
             value = await self._ccb.get_single_property(
                 self.entity_description.unit,
                 self.entity_description.subunit,
                 self.entity_description.property_id,
                 self.entity_description.property_type,
             )
-            if not self._constraints_loaded:
+            if self._constraints_generation != generation:
                 await self._update_constraints()
+            if generation != self._ccb.connection_generation:
+                raise ValueError("Bridge session changed while reading the number")
         except (ComfoConnectRmiError, AioComfoConnectTimeout, AioComfoConnectNotConnected, AioComfoConnectNotReachable, ValueError) as err:
-            self._attr_available = self._ccb.is_available and self._constraints_loaded
+            self._attr_available = self._ccb.is_available and self._constraints_generation == self._ccb.connection_generation
             _LOGGER.warning("Could not update %s; keeping the last value: %s", self.entity_description.name, err)
             return
 
@@ -266,15 +274,18 @@ class ComfoConnectNumber(NumberEntity):
 
     async def _update_constraints(self) -> None:
         """Read min, max, and step metadata from the ventilation unit."""
+        generation = self._ccb.connection_generation
         range_data = await self._read_property_metadata(PROPERTY_RANGE)
         step_data = await self._read_property_metadata(PROPERTY_STEP)
         if len(range_data) < 2 or not step_data or range_data[0] > range_data[1] or step_data[0] <= 0:
             raise ValueError("Invalid number property constraints")
+        if generation != self._ccb.connection_generation:
+            raise ValueError("Bridge session changed while reading number constraints")
 
         self._attr_native_min_value = self._decode_value(range_data[0])
         self._attr_native_max_value = self._decode_value(range_data[1])
         self._attr_native_step = self._decode_value(step_data[0])
-        self._constraints_loaded = True
+        self._constraints_generation = generation
 
     async def _read_property_metadata(self, kind: int) -> list[int]:
         """Read typed property metadata values from the bridge."""
