@@ -31,6 +31,16 @@ This integration supports the following additional features over the existing in
 
 **Note: Not all sensors are enabled by default. You can enable them on the integration page.**
 
+### Timed boost and away modes
+
+Choose a duration in the Boost Mode or Away Mode select to start a timer. Choose `Off`, or use the corresponding Cancel button, to stop it. `Active` reports a running timer; selecting it does not start or extend a timer.
+
+### Advanced airflow and temperature targets
+
+Number entities are disabled by default and use the unit's own minimum, maximum, and step values. They become available after the integration has read those constraints successfully.
+
+Changing an airflow target overwrites the installer's commissioned airflow setting for that speed. Record the existing values and consult your installer before changing them, since these settings affect the ventilation balance.
+
 ## Installation
 
 ### HACS
