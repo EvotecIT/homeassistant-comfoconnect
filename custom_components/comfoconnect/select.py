@@ -61,11 +61,13 @@ TIMER_OFF = "Off"
 TIMER_ACTIVE = "Active"
 TIMEOUT_OPTIONS = ("10 Minutes", "20 Minutes", "30 Minutes", "40 Minutes", "50 Minutes", "60 Minutes")
 TIMER_OPTIONS = (TIMER_OFF, TIMER_ACTIVE, *TIMEOUT_OPTIONS)
+AWAY_OPTIONS = (*TIMER_OPTIONS, "2 Hours", "8 Hours", "24 Hours", "7 Days", "14 Days")
 
 
 def _timeout_seconds(option: str) -> int:
     """Convert a timeout option to seconds."""
-    return int(option.split()[0]) * 60
+    duration, unit = option.split()
+    return int(duration) * {"Minutes": 60, "Hours": 3600, "Days": 86400}[unit]
 
 
 def _timer_option(active: bool) -> str:
@@ -200,7 +202,7 @@ SELECT_TYPES = (
         entity_category=EntityCategory.CONFIG,
         get_value_fn=_get_away_option,
         set_value_fn=_set_away_option,
-        options=list(TIMER_OPTIONS),
+        options=list(AWAY_OPTIONS),
     ),
     ComfoconnectSelectEntityDescription(
         key="sensor_ventmode_temperature_passive",
