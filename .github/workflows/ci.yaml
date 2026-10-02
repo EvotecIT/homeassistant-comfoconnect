@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ ubuntu-latest ]
-        python-version: [ "3.13" ]
+        python-version: [ "3.12" ]
     steps:
       - name: Check out ${{ github.sha }} from repository ${{ github.repository }}
         uses: actions/checkout@v4
@@ -44,3 +44,6 @@ jobs:
 
       - name: Run checks
         run: make check
+
+      - name: Run tests
+        run: make test

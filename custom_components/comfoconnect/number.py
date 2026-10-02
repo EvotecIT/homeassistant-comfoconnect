@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from aiocomfoconnect.const import (
@@ -10,14 +11,24 @@ from aiocomfoconnect.const import (
     PdoType,
     VentilationSpeed,
 )
+from aiocomfoconnect.exceptions import (
+    AioComfoConnectNotConnected,
+    AioComfoConnectNotReachable,
+    AioComfoConnectTimeout,
+    ComfoConnectRmiError,
+)
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberEntityDescription, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature, UnitOfVolumeFlowRate
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import DOMAIN, ComfoConnectBridge
+from . import DOMAIN, SIGNAL_COMFOCONNECT_AVAILABILITY, ComfoConnectBridge
+
+_LOGGER = logging.getLogger(__name__)
 
 PROPERTY_RANGE = 0x20
 PROPERTY_STEP = 0x40
@@ -183,26 +194,68 @@ class ComfoConnectNumber(NumberEntity):
     ) -> None:
         """Initialize the ComfoConnect number."""
         self._ccb = ccb
+        self._constraints_generation: int | None = None
+        self._attr_available = False
         self.entity_description = description
         self._attr_unique_id = f"{self._ccb.uuid}-{description.key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._ccb.uuid)},
         )
 
+    async def async_added_to_hass(self) -> None:
+        """Register for bridge availability changes."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                SIGNAL_COMFOCONNECT_AVAILABILITY.format(self._ccb.uuid),
+                self._handle_availability_update,
+            )
+        )
+
+    @property
+    def available(self) -> bool:
+        """Use constraints only from the bridge's current acknowledged session."""
+        return self._attr_available and self._ccb.is_available and self._constraints_generation == self._ccb.connection_generation
+
+    @callback
+    def _handle_availability_update(self, available: bool) -> None:
+        """Invalidate constraints on disconnect and wait for a successful poll."""
+        if not available:
+            self._constraints_generation = None
+        self._attr_available = available and self._constraints_generation == self._ccb.connection_generation
+        self.async_write_ha_state()
+
     async def async_update(self) -> None:
-        """Update the value and device-provided constraints."""
-        self._attr_native_value = self._decode_value(
-            await self._ccb.get_single_property(
+        """Read the value, loading constraints once per bridge connection."""
+        if not self._ccb.is_available:
+            self._handle_availability_update(False)
+            return
+
+        try:
+            generation = self._ccb.connection_generation
+            value = await self._ccb.get_single_property(
                 self.entity_description.unit,
                 self.entity_description.subunit,
                 self.entity_description.property_id,
                 self.entity_description.property_type,
             )
-        )
-        await self._update_constraints()
+            if self._constraints_generation != generation:
+                await self._update_constraints()
+            if generation != self._ccb.connection_generation:
+                raise ValueError("Bridge session changed while reading the number")
+        except (ComfoConnectRmiError, AioComfoConnectTimeout, AioComfoConnectNotConnected, AioComfoConnectNotReachable, ValueError) as err:
+            self._attr_available = self._ccb.is_available and self._constraints_generation == self._ccb.connection_generation
+            _LOGGER.warning("Could not update %s; keeping the last value: %s", self.entity_description.name, err)
+            return
+
+        self._attr_native_value = self._decode_value(value)
+        self._attr_available = True
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the configured property value."""
+        if not self.available:
+            raise HomeAssistantError("The number is unavailable until its value and constraints have been read")
+
         encoded_value = round(value * self.entity_description.scale)
 
         if self.entity_description.speed:
@@ -216,18 +269,23 @@ class ComfoConnectNumber(NumberEntity):
                 self.entity_description.property_type,
             )
 
-        self._attr_native_value = value
+        self._attr_native_value = self._decode_value(encoded_value)
+        self.async_write_ha_state()
 
     async def _update_constraints(self) -> None:
         """Read min, max, and step metadata from the ventilation unit."""
+        generation = self._ccb.connection_generation
         range_data = await self._read_property_metadata(PROPERTY_RANGE)
-        if len(range_data) >= 2:
-            self._attr_native_min_value = self._decode_value(range_data[0])
-            self._attr_native_max_value = self._decode_value(range_data[1])
-
         step_data = await self._read_property_metadata(PROPERTY_STEP)
-        if step_data:
-            self._attr_native_step = self._decode_value(step_data[0])
+        if len(range_data) < 2 or not step_data or range_data[0] > range_data[1] or step_data[0] <= 0:
+            raise ValueError("Invalid number property constraints")
+        if generation != self._ccb.connection_generation:
+            raise ValueError("Bridge session changed while reading number constraints")
+
+        self._attr_native_min_value = self._decode_value(range_data[0])
+        self._attr_native_max_value = self._decode_value(range_data[1])
+        self._attr_native_step = self._decode_value(step_data[0])
+        self._constraints_generation = generation
 
     async def _read_property_metadata(self, kind: int) -> list[int]:
         """Read typed property metadata values from the bridge."""

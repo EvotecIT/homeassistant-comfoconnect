@@ -26,12 +26,17 @@ from aiocomfoconnect.sensors import (
 )
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import DOMAIN, SIGNAL_COMFOCONNECT_UPDATE_RECEIVED, ComfoConnectBridge
+from . import (
+    DOMAIN,
+    SIGNAL_COMFOCONNECT_AVAILABILITY,
+    SIGNAL_COMFOCONNECT_UPDATE_RECEIVED,
+    ComfoConnectBridge,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,11 +61,13 @@ TIMER_OFF = "Off"
 TIMER_ACTIVE = "Active"
 TIMEOUT_OPTIONS = ("10 Minutes", "20 Minutes", "30 Minutes", "40 Minutes", "50 Minutes", "60 Minutes")
 TIMER_OPTIONS = (TIMER_OFF, TIMER_ACTIVE, *TIMEOUT_OPTIONS)
+AWAY_OPTIONS = (*TIMER_OPTIONS, "2 Hours", "8 Hours", "24 Hours", "7 Days", "14 Days")
 
 
 def _timeout_seconds(option: str) -> int:
     """Convert a timeout option to seconds."""
-    return int(option.split()[0]) * 60
+    duration, unit = option.split()
+    return int(duration) * {"Minutes": 60, "Hours": 3600, "Days": 86400}[unit]
 
 
 def _timer_option(active: bool) -> str:
@@ -195,7 +202,7 @@ SELECT_TYPES = (
         entity_category=EntityCategory.CONFIG,
         get_value_fn=_get_away_option,
         set_value_fn=_set_away_option,
-        options=list(TIMER_OPTIONS),
+        options=list(AWAY_OPTIONS),
     ),
     ComfoconnectSelectEntityDescription(
         key="sensor_ventmode_temperature_passive",
@@ -269,12 +276,21 @@ class ComfoConnectSelect(SelectEntity):
         self.entity_description = description
         self._attr_should_poll = False if description.sensor else True
         self._attr_unique_id = f"{self._ccb.uuid}-{description.key}"
+        self._attr_available = ccb.is_available
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._ccb.uuid)},
         )
 
     async def async_added_to_hass(self) -> None:
-        """Register for sensor updates."""
+        """Register for sensor updates and availability changes."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                SIGNAL_COMFOCONNECT_AVAILABILITY.format(self._ccb.uuid),
+                self._handle_availability_update,
+            )
+        )
+
         if not self.entity_description.sensor:
             return
 
@@ -292,6 +308,13 @@ class ComfoConnectSelect(SelectEntity):
         )
         await self._ccb.register_sensor(self.entity_description.sensor)
 
+    @callback
+    def _handle_availability_update(self, available: bool) -> None:
+        """Handle bridge availability changes."""
+        self._attr_available = available
+        self.async_write_ha_state()
+
+    @callback
     def _handle_update(self, value):
         """Handle update callbacks."""
         _LOGGER.debug(
@@ -302,7 +325,7 @@ class ComfoConnectSelect(SelectEntity):
         )
 
         self._attr_current_option = self.entity_description.sensor_value_fn(value)
-        self.schedule_update_ha_state()
+        self.async_write_ha_state()
 
     async def async_update(self) -> None:
         """Update the state."""
@@ -311,5 +334,12 @@ class ComfoConnectSelect(SelectEntity):
     async def async_select_option(self, option: str) -> None:
         """Set the selected option."""
         await self.entity_description.set_value_fn(self._ccb, option)
-        self._attr_current_option = option
-        self.schedule_update_ha_state()
+        if TIMER_ACTIVE in self.entity_description.options:
+            if option == TIMER_ACTIVE:
+                # Active only reports status; selecting it must not invent a timer.
+                self._attr_current_option = await self.entity_description.get_value_fn(self._ccb)
+            else:
+                self._attr_current_option = TIMER_OFF if option == TIMER_OFF else TIMER_ACTIVE
+        else:
+            self._attr_current_option = option
+        self.async_write_ha_state()
