@@ -220,4 +220,4 @@ class ComfoConnectBridge(ComfoConnect):
         message = f"Alarm received for Node {node_id}:\n"
         for error_id, error in errors.items():
             message += f"* {error_id}: {error}\n"
-        _LOGGER.warning(message)
+        _LOGGER.info(message)
