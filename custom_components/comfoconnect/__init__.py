@@ -201,6 +201,13 @@ class ComfoConnectBridge(ComfoConnect):
         self.active_alarms: dict[int, dict[int, str]] = {}
         self.is_available = True
         self._keepalive_lock = asyncio.Lock()
+        self.connection_generation = 0
+
+    async def cmd_start_session(self, take_over: bool = False):
+        """Track acknowledged sessions, including the library's automatic reconnects."""
+        result = await super().cmd_start_session(take_over)
+        self.connection_generation += 1
+        return result
 
     async def async_keepalive(self, local_uuid: str) -> None:
         """Run a keepalive, unless the previous one is still busy."""
