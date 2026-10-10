@@ -113,13 +113,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except ComfoConnectError as err:
             raise ConfigEntryNotReady from err
 
-    hass.data[DOMAIN][entry.entry_id] = bridge
+    # A failed read must not leave a reconnecting session behind the failed entry.
+    try:
+        bridge_info = await bridge.cmd_version_request()
+        unit_model = await bridge.get_property(PROPERTY_MODEL)
+        unit_firmware = await bridge.get_property(PROPERTY_FIRMWARE_VERSION)
+        unit_name = await bridge.get_property(PROPERTY_NAME)
+    except (ComfoConnectError, AioComfoConnectTimeout, AioComfoConnectNotConnected, AioComfoConnectNotReachable) as err:
+        await bridge.disconnect()
+        raise ConfigEntryNotReady("The bridge did not return its device information") from err
+    except BaseException:
+        # Cancellation or an unexpected read failure also releases the session.
+        await bridge.disconnect()
+        raise
 
-    # Get device information
-    bridge_info = await bridge.cmd_version_request()
-    unit_model = await bridge.get_property(PROPERTY_MODEL)
-    unit_firmware = await bridge.get_property(PROPERTY_FIRMWARE_VERSION)
-    unit_name = await bridge.get_property(PROPERTY_NAME)
+    hass.data[DOMAIN][entry.entry_id] = bridge
 
     device_registry = dr.async_get(hass)
 
@@ -148,8 +156,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     @callback
     async def send_keepalive(now) -> None:
-        """Send keepalive to the bridge."""
-        await bridge.async_keepalive(entry.data[CONF_LOCAL_UUID])
+        """Check reachability and recover a lost bridge session."""
+        try:
+            await bridge.async_keepalive(entry.data[CONF_LOCAL_UUID])
+        except ComfoConnectNotAllowed:
+            entry.async_start_reauth(hass)
 
     entry.async_on_unload(async_track_time_interval(hass, send_keepalive, KEEP_ALIVE_INTERVAL))
 
@@ -198,20 +209,25 @@ class ComfoConnectBridge(ComfoConnect):
         return result
 
     async def async_keepalive(self, local_uuid: str) -> None:
-        """Restore availability only after receiving a reply from the bridge."""
-        _LOGGER.debug("Sending keepalive...")
+        """Recover the bridge session and restore availability after a reply."""
         try:
-            # cmd_keepalive has no response; cmd_time_request proves the bridge is reachable.
+            # A time request acknowledges reachability; keepalive has no response.
             await self.cmd_time_request()
-        except (AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable):
+        except (ComfoConnectNotAllowed, AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable) as err:
             self.set_available(False)
+            if isinstance(err, ComfoConnectNotAllowed):
+                # TCP can remain open after another client takes the session.
+                await self.disconnect()
             try:
-                # connect() may return while the library is still retrying in the background.
+                # connect() may return while its background retry is still running.
                 await self.connect(local_uuid)
                 await self.cmd_time_request()
             except (AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable):
-                _LOGGER.debug("Could not connect to the bridge. Retrying later...")
+                _LOGGER.debug("Could not reach the bridge. Retrying later...")
                 return
+            except ComfoConnectNotAllowed:
+                await self.disconnect()
+                raise
         self.set_available(True)
 
     @callback
