@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Callable
 
 from aiocomfoconnect.sensors import (
     SENSOR_AIRFLOW_CONSTRAINTS,
