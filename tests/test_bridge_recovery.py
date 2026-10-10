@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from aiocomfoconnect.exceptions import AioComfoConnectNotConnected, AioComfoConnectTimeout, ComfoConnectNotAllowed, ComfoConnectOtherSession
-from custom_components.comfoconnect import SIGNAL_COMFOCONNECT_AVAILABILITY, ComfoConnectBridge, async_setup_entry
+from custom_components.comfoconnect import SIGNAL_COMFOCONNECT_AVAILABILITY, ComfoConnectBridge, async_setup_entry, async_unload_entry
 from custom_components.comfoconnect.const import CONF_LOCAL_UUID, CONF_UUID
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
@@ -77,6 +78,7 @@ def test_keepalive_callback_starts_reauth_for_persistent_refusal():
         )
         entry = SimpleNamespace(
             entry_id="entry",
+            state=ConfigEntryState.LOADED,
             data={"host": "127.0.0.1", CONF_UUID: "bridge", CONF_LOCAL_UUID: "local"},
             async_on_unload=Mock(),
             async_start_reauth=Mock(),
@@ -87,6 +89,7 @@ def test_keepalive_callback_starts_reauth_for_persistent_refusal():
             cmd_version_request=AsyncMock(return_value=SimpleNamespace(serialNumber="test", gatewayVersion=1)),
             get_property=AsyncMock(side_effect=["Q450", 1, "Unit"]),
             async_keepalive=AsyncMock(side_effect=ComfoConnectNotAllowed("Refused")),
+            async_close=AsyncMock(),
         )
 
         def register_interval(_hass, handler, _interval):
@@ -100,7 +103,55 @@ def test_keepalive_callback_starts_reauth_for_persistent_refusal():
         ):
             assert await async_setup_entry(hass, entry)
             await callbacks[0](None)
+            entry.state = ConfigEntryState.UNLOAD_IN_PROGRESS
+            await callbacks[0](None)
+            bridge.async_keepalive.assert_awaited_once()
+            await hass.bus.async_listen_once.call_args.args[1](None)
+            bridge.async_close.assert_awaited_once()
         entry.async_start_reauth.assert_called_once_with(hass)
+
+    asyncio.run(scenario())
+
+
+def test_unload_waits_for_reconnect_and_closes_the_final_session(tmp_path):
+    """A connection completed during unload must not outlive its config entry."""
+
+    async def scenario():
+        hass = HomeAssistant(str(tmp_path))
+        bridge = ComfoConnectBridge(hass, "127.0.0.1", "test-bridge")
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        session = {"open": False}
+
+        async def connect(_local_uuid):
+            entered.set()
+            await release.wait()
+            session["open"] = True
+
+        async def disconnect():
+            session["open"] = False
+
+        bridge.connect = AsyncMock(side_effect=connect)
+        bridge.disconnect = AsyncMock(side_effect=disconnect)
+        bridge.cmd_time_request = AsyncMock(side_effect=[AioComfoConnectNotConnected("Offline"), None])
+        hass.data["comfoconnect"] = {"entry": bridge}
+        entry = SimpleNamespace(entry_id="entry", state=ConfigEntryState.UNLOAD_IN_PROGRESS)
+        keepalive = asyncio.create_task(bridge.async_keepalive("local"))
+        await entered.wait()
+        with patch.object(hass, "config_entries", new=SimpleNamespace(async_unload_platforms=AsyncMock(return_value=True))):
+            closing = asyncio.create_task(async_unload_entry(hass, entry))
+            try:
+                await asyncio.sleep(0)
+                assert not closing.done(), "Unload must wait for an in-flight reconnect"
+            finally:
+                release.set()
+                await asyncio.gather(keepalive, closing)
+        assert not session["open"]
+        assert "entry" not in hass.data["comfoconnect"]
+        previous_calls = bridge.connect.await_count
+        await bridge.async_keepalive("local")
+        assert bridge.connect.await_count == previous_calls
+        assert not session["open"]
 
     asyncio.run(scenario())
 
