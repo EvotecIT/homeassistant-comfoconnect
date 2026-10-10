@@ -43,6 +43,7 @@ from aiocomfoconnect.sensors import (
     SENSOR_PREHEATER_POWER_TOTAL,
     SENSOR_PREHEATER_POWER_TOTAL_YEAR,
     SENSOR_RMOT,
+    SENSOR_TARGET_TEMPERATURE,
     SENSOR_TEMPERATURE_EXHAUST,
     SENSOR_TEMPERATURE_EXTRACT,
     SENSOR_TEMPERATURE_OUTDOOR,
@@ -493,6 +494,16 @@ SENSOR_TYPES = (
         entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
         mapping=lambda x: COMFORT_CONTROL_STATE.get(x, x),
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_TARGET_TEMPERATURE,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        name="Target temperature",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        ccb_sensor=SENSORS.get(SENSOR_TARGET_TEMPERATURE),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
 )
 
