@@ -225,42 +225,46 @@ class ComfoConnectBridge(ComfoConnect):
             await self.disconnect()
 
     async def async_keepalive(self, local_uuid: str) -> None:
-        """Recover the bridge session and restore availability after a reply."""
+        """Run a keepalive unless closing or the previous run is still busy."""
+        if self._closing or self._keepalive_lock.locked():
+            return
         async with self._keepalive_lock:
+            await self._async_keepalive(local_uuid)
+
+    async def _async_keepalive(self, local_uuid: str) -> None:
+        """Recover the bridge session and restore availability after a reply."""
+        try:
+            # A time request acknowledges reachability; keepalive has no response.
+            await self.cmd_time_request()
+        except (
+            ComfoConnectNotAllowed,
+            ComfoConnectOtherSession,
+            AioComfoConnectNotConnected,
+            AioComfoConnectTimeout,
+            AioComfoConnectNotReachable,
+        ) as err:
             if self._closing:
                 return
+            self.set_available(False)
+            if isinstance(err, (ComfoConnectNotAllowed, ComfoConnectOtherSession)):
+                # TCP can remain open after another client takes the session.
+                await self.disconnect()
             try:
-                # A time request acknowledges reachability; keepalive has no response.
+                # connect() may return while its background retry is still running.
+                await self.connect(local_uuid)
                 await self.cmd_time_request()
-            except (
-                ComfoConnectNotAllowed,
-                ComfoConnectOtherSession,
-                AioComfoConnectNotConnected,
-                AioComfoConnectTimeout,
-                AioComfoConnectNotReachable,
-            ) as err:
-                if self._closing:
-                    return
-                self.set_available(False)
-                if isinstance(err, (ComfoConnectNotAllowed, ComfoConnectOtherSession)):
-                    # TCP can remain open after another client takes the session.
-                    await self.disconnect()
-                try:
-                    # connect() may return while its background retry is still running.
-                    await self.connect(local_uuid)
-                    await self.cmd_time_request()
-                except (AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable):
-                    _LOGGER.debug("Could not reach the bridge. Retrying later...")
-                    return
-                except ComfoConnectNotAllowed:
-                    await self.disconnect()
-                    raise
-                except ComfoConnectOtherSession:
-                    await self.disconnect()
-                    _LOGGER.debug("The bridge session is still owned by another client. Retrying later...")
-                    return
-            if not self._closing:
-                self.set_available(True)
+            except (AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable):
+                _LOGGER.debug("Could not reach the bridge. Retrying later...")
+                return
+            except ComfoConnectNotAllowed:
+                await self.disconnect()
+                raise
+            except ComfoConnectOtherSession:
+                await self.disconnect()
+                _LOGGER.debug("The bridge session is still owned by another client. Retrying later...")
+                return
+        if not self._closing:
+            self.set_available(True)
 
     @callback
     def set_available(self, available: bool) -> None:

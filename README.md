@@ -16,6 +16,7 @@ integration in Home Assistant.
 * Control ComfoCool mode (auto / off)
 * Control timed boost and away modes
 * Configure advanced airflow and temperature targets
+* Show yearly energy totals and avoided heating/cooling measurements
 * Show an Active alarms diagnostic binary sensor
 * Configure passive-temperature and humidity ventilation controls
 * Show various sensors
