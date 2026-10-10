@@ -14,17 +14,21 @@ from aiocomfoconnect.sensors import (
     SENSOR_ANALOG_INPUT_3,
     SENSOR_ANALOG_INPUT_4,
     SENSOR_BYPASS_STATE,
+    SENSOR_CHANGING_FILTERS,
     SENSOR_COMFOCOOL_CONDENSOR_TEMP,
     SENSOR_COMFOFOND_GHE_STATE,
     SENSOR_COMFOFOND_TEMP_GROUND,
     SENSOR_COMFOFOND_TEMP_OUTDOOR,
     SENSOR_DAYS_TO_REPLACE_FILTER,
+    SENSOR_DEVICE_STATE,
     SENSOR_FAN_EXHAUST_DUTY,
     SENSOR_FAN_EXHAUST_FLOW,
     SENSOR_FAN_EXHAUST_SPEED,
+    SENSOR_FAN_SPEED_MODE_MODULATED,
     SENSOR_FAN_SUPPLY_DUTY,
     SENSOR_FAN_SUPPLY_FLOW,
     SENSOR_FAN_SUPPLY_SPEED,
+    SENSOR_HUMIDITY_AFTER_PREHEATER,
     SENSOR_HUMIDITY_EXHAUST,
     SENSOR_HUMIDITY_EXTRACT,
     SENSOR_HUMIDITY_OUTDOOR,
@@ -33,11 +37,14 @@ from aiocomfoconnect.sensors import (
     SENSOR_POWER_USAGE_TOTAL,
     SENSOR_PREHEATER_POWER,
     SENSOR_PREHEATER_POWER_TOTAL,
+    SENSOR_RF_PAIRING_MODE,
     SENSOR_RMOT,
     SENSOR_TEMPERATURE_EXHAUST,
     SENSOR_TEMPERATURE_EXTRACT,
     SENSOR_TEMPERATURE_OUTDOOR,
     SENSOR_TEMPERATURE_SUPPLY,
+    SENSOR_UNIT_AIRFLOW,
+    SENSOR_UNIT_TEMPERATURE,
     SENSORS,
 )
 from aiocomfoconnect.sensors import (
@@ -76,6 +83,33 @@ from . import (
 _LOGGER = logging.getLogger(__name__)
 
 MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=10)
+
+
+DEVICE_STATE = {
+    0: "init",
+    1: "normal",
+    2: "filter_wizard",
+    3: "commissioning",
+    4: "supplier_factory",
+    5: "zehnder_factory",
+    6: "standby",
+    7: "away",
+    8: "dfc",
+}
+
+CHANGING_FILTERS_STATE = {
+    0: "idle",
+    1: "active",
+    2: "changing_filter",
+}
+
+RF_PAIRING_STATE = {
+    0: "not_running",
+    1: "running",
+    2: "done",
+    3: "failed",
+    4: "aborted",
+}
 
 
 @dataclass
@@ -380,6 +414,71 @@ SENSOR_TYPES = (
         ccb_sensor=SENSORS.get(SENSOR_COMFOCOOL_CONDENSOR_TEMP),
         entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_DEVICE_STATE,
+        name="Device state",
+        icon="mdi:list-status",
+        ccb_sensor=SENSORS.get(SENSOR_DEVICE_STATE),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        mapping=lambda x: DEVICE_STATE.get(x, x),
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_CHANGING_FILTERS,
+        name="Changing filters",
+        icon="mdi:air-filter",
+        ccb_sensor=SENSORS.get(SENSOR_CHANGING_FILTERS),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        mapping=lambda x: CHANGING_FILTERS_STATE.get(x, x),
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_RF_PAIRING_MODE,
+        name="RF pairing mode",
+        icon="mdi:radio-tower",
+        ccb_sensor=SENSORS.get(SENSOR_RF_PAIRING_MODE),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        mapping=lambda x: RF_PAIRING_STATE.get(x, x),
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_UNIT_TEMPERATURE,
+        name="Temperature unit",
+        icon="mdi:thermometer",
+        ccb_sensor=SENSORS.get(SENSOR_UNIT_TEMPERATURE),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_UNIT_AIRFLOW,
+        name="Airflow unit",
+        icon="mdi:fan",
+        ccb_sensor=SENSORS.get(SENSOR_UNIT_AIRFLOW),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_HUMIDITY_AFTER_PREHEATER,
+        device_class=SensorDeviceClass.HUMIDITY,
+        state_class=SensorStateClass.MEASUREMENT,
+        name="Outdoor humidity after preheater",
+        native_unit_of_measurement=PERCENTAGE,
+        ccb_sensor=SENSORS.get(SENSOR_HUMIDITY_AFTER_PREHEATER),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_FAN_SPEED_MODE_MODULATED,
+        state_class=SensorStateClass.MEASUREMENT,
+        name="Modulated fan speed",
+        native_unit_of_measurement=PERCENTAGE,
+        icon="mdi:fan-clock",
+        ccb_sensor=SENSORS.get(SENSOR_FAN_SPEED_MODE_MODULATED),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        mapping=lambda x: x / 3,
+        throttle=True,
     ),
 )
 

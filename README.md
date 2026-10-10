@@ -12,6 +12,7 @@ integration in Home Assistant.
 * Control ventilation speed
 * Control ventilation mode (auto / manual)
 * Control ComfoCool mode (auto / off)
+* Show extended device and filter diagnostics
 * Show various sensors
 
 This integration supports the following additional features over the existing integration:
