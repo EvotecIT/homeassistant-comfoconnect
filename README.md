@@ -15,6 +15,8 @@ integration in Home Assistant.
 * Show yearly energy totals and avoided heating/cooling measurements
 * Show an Active alarms diagnostic binary sensor
 * Configure passive-temperature and humidity ventilation controls
+
+* Configure heating and cooling RMOT thresholds
 * Show various sensors
 
 This integration supports the following additional features over the existing integration:
@@ -32,6 +34,10 @@ This integration supports the following additional features over the existing in
 ### Boost mode
 
 Choose a duration in Boost Mode to start a timer. Choose `Off`, or use Cancel boost, to stop it. `Active` reports a running timer; selecting it does not start or extend a timer.
+
+### RMOT thresholds
+
+Heating and cooling running mean outdoor temperature (RMOT) thresholds are available as disabled-by-default number entities. They use the unit's own minimum, maximum, and step values and become available after those constraints are read successfully.
 
 ## Installation
 
