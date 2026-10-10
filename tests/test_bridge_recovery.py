@@ -103,3 +103,31 @@ def test_keepalive_callback_starts_reauth_for_persistent_refusal():
         entry.async_start_reauth.assert_called_once_with(hass)
 
     asyncio.run(scenario())
+
+
+def test_overlapping_keepalive_is_skipped(tmp_path):
+    """A keepalive that starts while a slow recovery is running must not touch the session."""
+
+    async def scenario():
+        hass = HomeAssistant(str(tmp_path))
+        bridge = ComfoConnectBridge(hass, "127.0.0.1", "test-bridge")
+        connecting = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_connect(local_uuid):
+            connecting.set()
+            await release.wait()
+
+        bridge.cmd_time_request = AsyncMock(side_effect=[ComfoConnectOtherSession("Other client"), None])
+        bridge.connect = AsyncMock(side_effect=slow_connect)
+        bridge.disconnect = AsyncMock()
+        first = asyncio.create_task(bridge.async_keepalive("local"))
+        await connecting.wait()
+        await bridge.async_keepalive("local")
+        assert bridge.disconnect.await_count == 1
+        assert bridge.cmd_time_request.await_count == 1
+        release.set()
+        await first
+        assert bridge.is_available
+
+    asyncio.run(scenario())
