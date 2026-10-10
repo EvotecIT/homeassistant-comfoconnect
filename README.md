@@ -27,6 +27,10 @@ This integration supports the following additional features over the existing in
 
 **Note: Not all sensors are enabled by default. You can enable them on the integration page.**
 
+### Boost mode
+
+Choose a duration in Boost Mode to start a timer. Choose `Off`, or use Cancel boost, to stop it. `Active` reports a running timer; selecting it does not start or extend a timer.
+
 ## Installation
 
 ### HACS
