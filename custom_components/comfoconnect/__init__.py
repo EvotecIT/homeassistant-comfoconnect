@@ -47,6 +47,7 @@ PLATFORMS: list[Platform] = [
 _LOGGER = logging.getLogger(__name__)
 
 SIGNAL_COMFOCONNECT_UPDATE_RECEIVED = "comfoconnect_update_{}_{}"
+SIGNAL_COMFOCONNECT_ALARM_RECEIVED = "comfoconnect_alarm_{}"
 SIGNAL_COMFOCONNECT_AVAILABILITY = "comfoconnect_availability_{}"
 
 KEEP_ALIVE_INTERVAL = timedelta(seconds=30)
@@ -202,6 +203,8 @@ class ComfoConnectBridge(ComfoConnect):
             self.alarm_callback,
         )
         self.hass = hass
+        # Latest alarms per node; a node is missing until it has reported.
+        self.active_alarms: dict[int, dict[int, str]] = {}
         self.is_available = True
 
     @callback
@@ -223,8 +226,13 @@ class ComfoConnectBridge(ComfoConnect):
         )
 
     @callback
-    def alarm_callback(self, node_id, errors):
-        """Print alarm updates."""
+    def alarm_callback(self, node_id: int, errors: dict[int, str]) -> None:
+        """Cache changed alarms and notify the diagnostic sensor."""
+        if self.active_alarms.get(node_id) == errors:
+            return
+        self.active_alarms[node_id] = dict(errors)
+        dispatcher_send(self.hass, SIGNAL_COMFOCONNECT_ALARM_RECEIVED.format(self.uuid))
+
         message = f"Alarm received for Node {node_id}:\n"
         for error_id, error in errors.items():
             message += f"* {error_id}: {error}\n"
