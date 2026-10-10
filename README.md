@@ -12,6 +12,7 @@ integration in Home Assistant.
 * Control ventilation speed
 * Control ventilation mode (auto / manual)
 * Control ComfoCool mode (auto / off)
+* Show yearly energy totals and avoided heating/cooling measurements
 * Show an Active alarms diagnostic binary sensor
 * Configure passive-temperature and humidity ventilation controls
 * Show various sensors
