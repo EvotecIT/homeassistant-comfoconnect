@@ -157,7 +157,7 @@ class ComfoConnectBinarySensor(BinarySensorEntity):
             value,
         )
 
-        self._attr_is_on = True if value else False
+        self._attr_is_on = bool(value)
         self.async_write_ha_state()
 
 

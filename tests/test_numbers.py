@@ -131,7 +131,7 @@ def test_readback_grace_expires_instead_of_hiding_the_device_forever(tmp_path):
     async def scenario():
         hass = HomeAssistant(str(tmp_path))
         setup_loader(hass)
-        bridge, entity = number_entity(hass)
+        _bridge, entity = number_entity(hass)
         await entity.async_update()
         with patch("custom_components.comfoconnect.number.monotonic", return_value=100):
             await entity.async_set_native_value(21)
@@ -201,9 +201,11 @@ def test_failed_write_and_failed_session_start_do_not_publish_success(tmp_path):
         with pytest.raises(ComfoConnectRmiError):
             await entity.async_set_native_value(21)
         assert hass.states.get(entity.entity_id).state == "20.0"
-        with patch("aiocomfoconnect.bridge.Bridge._send", new=AsyncMock(side_effect=AioComfoConnectNotConnected("Offline"))):
-            with pytest.raises(AioComfoConnectNotConnected):
-                await bridge.cmd_start_session(True)
+        with (
+            patch("aiocomfoconnect.bridge.Bridge._send", new=AsyncMock(side_effect=AioComfoConnectNotConnected("Offline"))),
+            pytest.raises(AioComfoConnectNotConnected),
+        ):
+            await bridge.cmd_start_session(True)
         assert entity.available
 
     asyncio.run(scenario())

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Callable
 
 from aiocomfoconnect.sensors import (
     SENSOR_AIRFLOW_CONSTRAINTS,
@@ -122,16 +122,18 @@ RF_PAIRING_STATE = {
     3: "failed",
     4: "aborted",
 }
-COMFORT_CONTROL_STATE = {
-    0: "disabled",
-    1: "active",
-    2: "overruling",
-}
 
 
 def _next_change_value(value: int) -> int | None:
     """Map the bridge no-change sentinel to an unknown HA duration."""
     return None if value in NO_SCHEDULED_CHANGE_VALUES else value
+
+
+COMFORT_CONTROL_STATE = {
+    0: "disabled",
+    1: "active",
+    2: "overruling",
+}
 
 
 @dataclass
@@ -349,15 +351,6 @@ SENSOR_TYPES = (
         ccb_sensor=SENSORS.get(SENSOR_UNIT_AIRFLOW),
         entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
-    ),
-    ComfoconnectSensorEntityDescription(
-        key=SENSOR_COMFORTCONTROL_MODE,
-        name="Sensor based ventilation state",
-        icon="mdi:auto-fix",
-        ccb_sensor=SENSORS.get(SENSOR_COMFORTCONTROL_MODE),
-        entity_registry_enabled_default=False,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        mapping=lambda x: COMFORT_CONTROL_STATE.get(x, x),
     ),
     ComfoconnectSensorEntityDescription(
         key=SENSOR_FAN_SPEED_MODE_MODULATED,
@@ -652,6 +645,15 @@ SENSOR_TYPES = (
         ccb_sensor=SENSORS.get(SENSOR_COMFOCOOL_CONDENSOR_TEMP),
         entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_COMFORTCONTROL_MODE,
+        name="Sensor based ventilation state",
+        icon="mdi:auto-fix",
+        ccb_sensor=SENSORS.get(SENSOR_COMFORTCONTROL_MODE),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        mapping=lambda x: COMFORT_CONTROL_STATE.get(x, x),
     ),
 )
 

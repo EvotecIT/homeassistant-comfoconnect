@@ -35,3 +35,9 @@ def test_diagnostic_values_reach_ha(tmp_path, sensor_id, raw, state):
         assert not entity.entity_registry_enabled_default
 
     asyncio.run(scenario())
+
+
+def test_sensor_keys_are_unique():
+    """Each exposed sensor must have one registration and one HA identity."""
+    keys = [description.key for description in SENSOR_TYPES]
+    assert len(keys) == len(set(keys))

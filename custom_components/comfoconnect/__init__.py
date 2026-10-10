@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 
@@ -22,7 +23,7 @@ from aiocomfoconnect.properties import (
 from aiocomfoconnect.sensors import Sensor
 from aiocomfoconnect.util import version_decode
 from homeassistant.components import network, persistent_notification
-from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
+from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_HOST, EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import (
@@ -133,7 +134,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     device_registry = dr.async_get(hass)
 
     # Add Bridge to device registry
-    device_registry.async_get_or_create(
+    bridge_device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, bridge_info.serialNumber)},
         manufacturer="Zehnder",
@@ -142,33 +143,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         sw_version=version_decode(bridge_info.gatewayVersion),
     )
 
-    # Add Ventilation Unit to device registry
-    device_registry.async_get_or_create(
+    # Add Ventilation Unit to device registry, connected through the bridge. Passing `via_device` to
+    # async_get_or_create is deprecated, and its replacement `via_device_id` only exists there since
+    # Home Assistant 2026.8, so link the devices with async_update_device, which works on all versions.
+    unit_device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, bridge.uuid)},
         manufacturer="Zehnder",
         name=unit_name,
         model=unit_model,
         sw_version=version_decode(unit_firmware),
-        via_device=(DOMAIN, bridge_info.serialNumber),
     )
+    device_registry.async_update_device(unit_device.id, via_device_id=bridge_device.id)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     @callback
     async def send_keepalive(now) -> None:
         """Check reachability and recover a lost bridge session."""
+        if entry.state is not ConfigEntryState.LOADED:
+            return
         try:
             await bridge.async_keepalive(entry.data[CONF_LOCAL_UUID])
         except ComfoConnectNotAllowed:
-            entry.async_start_reauth(hass)
+            if entry.state is ConfigEntryState.LOADED:
+                entry.async_start_reauth(hass)
 
     entry.async_on_unload(async_track_time_interval(hass, send_keepalive, KEEP_ALIVE_INTERVAL))
 
     # Disconnect when shutting down
     async def disconnect_bridge(event):
         """Close connection to the bridge."""
-        await bridge.disconnect()
+        await bridge.async_close()
 
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, disconnect_bridge))
 
@@ -179,7 +185,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         bridge = hass.data[DOMAIN][entry.entry_id]
-        await bridge.disconnect()
+        await bridge.async_close()
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
@@ -201,6 +207,8 @@ class ComfoConnectBridge(ComfoConnect):
         # Latest alarms per node; a node is missing until it has reported.
         self.active_alarms: dict[int, dict[int, str]] = {}
         self.is_available = True
+        self._keepalive_lock = asyncio.Lock()
+        self._closing = False
         self.connection_generation = 0
 
     async def cmd_start_session(self, take_over: bool = False):
@@ -209,37 +217,50 @@ class ComfoConnectBridge(ComfoConnect):
         self.connection_generation += 1
         return result
 
+    async def async_close(self) -> None:
+        """Stop keepalive work and close the final session after any active run."""
+        self._closing = True
+        self.set_available(False)
+        async with self._keepalive_lock:
+            await self.disconnect()
+
     async def async_keepalive(self, local_uuid: str) -> None:
         """Recover the bridge session and restore availability after a reply."""
-        try:
-            # A time request acknowledges reachability; keepalive has no response.
-            await self.cmd_time_request()
-        except (
-            ComfoConnectNotAllowed,
-            ComfoConnectOtherSession,
-            AioComfoConnectNotConnected,
-            AioComfoConnectTimeout,
-            AioComfoConnectNotReachable,
-        ) as err:
-            self.set_available(False)
-            if isinstance(err, (ComfoConnectNotAllowed, ComfoConnectOtherSession)):
-                # TCP can remain open after another client takes the session.
-                await self.disconnect()
+        async with self._keepalive_lock:
+            if self._closing:
+                return
             try:
-                # connect() may return while its background retry is still running.
-                await self.connect(local_uuid)
+                # A time request acknowledges reachability; keepalive has no response.
                 await self.cmd_time_request()
-            except (AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable):
-                _LOGGER.debug("Could not reach the bridge. Retrying later...")
-                return
-            except ComfoConnectNotAllowed:
-                await self.disconnect()
-                raise
-            except ComfoConnectOtherSession:
-                await self.disconnect()
-                _LOGGER.debug("The bridge session is still owned by another client. Retrying later...")
-                return
-        self.set_available(True)
+            except (
+                ComfoConnectNotAllowed,
+                ComfoConnectOtherSession,
+                AioComfoConnectNotConnected,
+                AioComfoConnectTimeout,
+                AioComfoConnectNotReachable,
+            ) as err:
+                if self._closing:
+                    return
+                self.set_available(False)
+                if isinstance(err, (ComfoConnectNotAllowed, ComfoConnectOtherSession)):
+                    # TCP can remain open after another client takes the session.
+                    await self.disconnect()
+                try:
+                    # connect() may return while its background retry is still running.
+                    await self.connect(local_uuid)
+                    await self.cmd_time_request()
+                except (AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable):
+                    _LOGGER.debug("Could not reach the bridge. Retrying later...")
+                    return
+                except ComfoConnectNotAllowed:
+                    await self.disconnect()
+                    raise
+                except ComfoConnectOtherSession:
+                    await self.disconnect()
+                    _LOGGER.debug("The bridge session is still owned by another client. Retrying later...")
+                    return
+            if not self._closing:
+                self.set_available(True)
 
     @callback
     def set_available(self, available: bool) -> None:
@@ -260,7 +281,7 @@ class ComfoConnectBridge(ComfoConnect):
         )
 
     @callback
-    def alarm_callback(self, node_id, errors):
+    def alarm_callback(self, node_id: int, errors: dict[int, str]) -> None:
         """Handle alarm updates."""
         if self.active_alarms.get(node_id) == errors:
             return

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 from aiocomfoconnect.const import (
     ComfoCoolMode,
@@ -113,7 +113,7 @@ SELECT_TYPES = (
         # translation_key="setting",
         sensor=SENSORS.get(SENSOR_OPERATING_MODE),
         sensor_value_fn=lambda value: {
-            -1: VentilationMode.AUTO,
+            255: VentilationMode.AUTO,
             1: VentilationMode.MANUAL,
         }.get(value),
     ),
@@ -274,7 +274,7 @@ class ComfoConnectSelect(SelectEntity):
         """Initialize the ComfoConnect select."""
         self._ccb = ccb
         self.entity_description = description
-        self._attr_should_poll = False if description.sensor else True
+        self._attr_should_poll = not description.sensor
         self._attr_unique_id = f"{self._ccb.uuid}-{description.key}"
         self._attr_available = ccb.is_available
         self._attr_device_info = DeviceInfo(
