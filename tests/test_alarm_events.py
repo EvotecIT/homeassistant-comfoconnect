@@ -21,11 +21,14 @@ def test_changed_and_cleared_alarm_events_keep_the_public_payload(tmp_path):
         remove = hass.bus.async_listen(EVENT_COMFOCONNECT_ALARM, received)
         try:
             bridge.alarm_callback(1, {79: "Replace filters"})
+            bridge.alarm_callback(2, {})
             bridge.alarm_callback(1, {79: "Replace filters"})
+            bridge.alarm_callback(2, {})
             bridge.alarm_callback(1, {})
             await hass.async_block_till_done()
             assert events == [
                 {"bridge_uuid": "test-bridge", "node_id": 1, "errors": [{"id": 79, "message": "Replace filters"}]},
+                {"bridge_uuid": "test-bridge", "node_id": 2, "errors": []},
                 {"bridge_uuid": "test-bridge", "node_id": 1, "errors": []},
             ]
         finally:

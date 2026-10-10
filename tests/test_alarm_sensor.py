@@ -29,8 +29,22 @@ def test_alarm_changes_and_clear_publish_sensor_state(tmp_path):
             await hass.async_block_till_done()
             state = hass.states.get(entity.entity_id)
             assert state.state == "on"
-            assert state.attributes["alarms"] == [{"id": 79, "message": "Replace filters"}]
+            assert state.attributes["alarms"] == [{"node_id": 1, "id": 79, "message": "Replace filters"}]
+            # Another node reporting no alarms must not clear the alarm of node 1.
+            bridge.alarm_callback(2, {})
+            await hass.async_block_till_done()
+            assert hass.states.get(entity.entity_id).state == "on"
+            bridge.alarm_callback(2, {79: "Check node 2"})
+            await hass.async_block_till_done()
+            state = hass.states.get(entity.entity_id)
+            assert state.attributes["alarm_count"] == 2
+            assert {alarm["node_id"] for alarm in state.attributes["alarms"]} == {1, 2}
             bridge.alarm_callback(1, {})
+            await hass.async_block_till_done()
+            state = hass.states.get(entity.entity_id)
+            assert state.state == "on"
+            assert state.attributes["alarms"] == [{"node_id": 2, "id": 79, "message": "Check node 2"}]
+            bridge.alarm_callback(2, {})
             await hass.async_block_till_done()
             state = hass.states.get(entity.entity_id)
             assert state.state == "off"
@@ -60,14 +74,14 @@ def test_alarm_subscription_uses_the_current_snapshot(tmp_path, initial, current
         entity.hass = hass
         entity.entity_id = "binary_sensor.alarms"
         if current is not None:
-            bridge.alarm_callback(2, current)
+            bridge.alarm_callback(1, current)
         await hass.async_block_till_done()
         await entity.async_added_to_hass()
         try:
             entity.async_write_ha_state()
             state = hass.states.get(entity.entity_id)
             assert state.state == expected
-            assert state.attributes["node_id"] == (2 if current is not None else None)
+            assert state.attributes["alarm_count"] == len(current or {})
         finally:
             await entity.async_will_remove_from_hass()
 

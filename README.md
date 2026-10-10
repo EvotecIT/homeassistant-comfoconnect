@@ -4,7 +4,7 @@
 
 This is a custom integration for Home Assistant to integrate with the Zehnder ComfoAirQ ventilation system. It's using the [aiocomfoconnect](https://github.com/michaelarnauts/aiocomfoconnect) library.
 
-This EvotecIT fork combines alarm notifications with advanced controls and diagnostics on `master`. The changes are also maintained as separate upstream contributions: [alarm notifications](https://github.com/michaelarnauts/home-assistant-comfoconnect/pull/151) and [advanced controls](https://github.com/michaelarnauts/home-assistant-comfoconnect/pull/152).
+This EvotecIT fork combines alarm notifications with advanced controls and diagnostics on `master`. The changes are also maintained as focused upstream contributions, including the [active-alarm sensor](https://github.com/michaelarnauts/home-assistant-comfoconnect/pull/151), [ventilation controls](https://github.com/michaelarnauts/home-assistant-comfoconnect/pull/152), and [session recovery](https://github.com/michaelarnauts/home-assistant-comfoconnect/pull/179).
 
 This custom integration is an upgrade over the existing `comfoconnect` integration and is meant for testing purposes. The goal is eventually to replace the existing `comfoconnect`
 integration in Home Assistant.

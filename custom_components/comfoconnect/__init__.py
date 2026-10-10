@@ -198,8 +198,8 @@ class ComfoConnectBridge(ComfoConnect):
             self.alarm_callback,
         )
         self.hass = hass
-        self.active_alarm_node_id: int | None = None
-        self.active_alarms: dict[int, str] = {}
+        # Latest alarms per node; a node is missing until it has reported.
+        self.active_alarms: dict[int, dict[int, str]] = {}
         self.is_available = True
         self.connection_generation = 0
 
@@ -262,12 +262,11 @@ class ComfoConnectBridge(ComfoConnect):
     @callback
     def alarm_callback(self, node_id, errors):
         """Handle alarm updates."""
-        if self.active_alarm_node_id == node_id and self.active_alarms == errors:
+        if self.active_alarms.get(node_id) == errors:
             return
 
-        self.active_alarm_node_id = node_id
-        self.active_alarms = errors.copy()
-        errors = self.active_alarms
+        self.active_alarms[node_id] = dict(errors)
+        errors = self.active_alarms[node_id]
 
         event_data = {
             "bridge_uuid": self.uuid,
@@ -278,18 +277,16 @@ class ComfoConnectBridge(ComfoConnect):
         dispatcher_send(
             self.hass,
             SIGNAL_COMFOCONNECT_ALARM_RECEIVED.format(self.uuid),
-            node_id,
-            errors,
         )
         self.hass.bus.async_fire(EVENT_COMFOCONNECT_ALARM, event_data)
 
         notification_id = PERSISTENT_NOTIFICATION_ID.format(self.uuid)
-        if not errors:
+        if not any(self.active_alarms.values()):
             _LOGGER.info("Alarms cleared for Node %s", node_id)
             persistent_notification.async_dismiss(self.hass, notification_id)
             return
 
-        title, message = self._format_alarm_notification(node_id, errors)
+        title, message = self._format_alarm_notification(self.active_alarms)
 
         _LOGGER.info(message)
         persistent_notification.async_create(
@@ -300,19 +297,13 @@ class ComfoConnectBridge(ComfoConnect):
         )
 
     @staticmethod
-    def _format_alarm_notification(node_id: int, errors: dict[int, str]) -> tuple[str, str]:
-        """Format active alarms for Home Assistant notifications."""
-        is_recheck = set(errors) == {ALARM_RECHECK_ERROR_ID}
+    def _format_alarm_notification(alarms: dict[int, dict[int, str]]) -> tuple[str, str]:
+        """Format all active node alarms for the bridge's notification."""
+        is_recheck = {error_id for errors in alarms.values() for error_id in errors} == {ALARM_RECHECK_ERROR_ID}
         title = "ComfoConnect is checking alarms" if is_recheck else "ComfoConnect needs attention"
         intro = "The ventilation unit is checking whether alarms are still active." if is_recheck else "The ventilation unit reported active alarms."
-        alarm_lines = [f"- **{error_id}**: {error}" for error_id, error in errors.items()]
-        message = "\n".join(
-            [
-                intro,
-                "",
-                f"Node: {node_id}",
-                "",
-                *alarm_lines,
-            ]
-        )
-        return title, message
+        lines = [intro]
+        for node_id, errors in sorted(alarms.items()):
+            if errors:
+                lines.extend(["", f"Node: {node_id}", "", *[f"- **{error_id}**: {error}" for error_id, error in errors.items()]])
+        return title, "\n".join(lines)
