@@ -99,7 +99,7 @@ SELECT_TYPES = (
         # translation_key="setting",
         sensor=SENSORS.get(SENSOR_OPERATING_MODE),
         sensor_value_fn=lambda value: {
-            -1: VentilationMode.AUTO,
+            255: VentilationMode.AUTO,
             1: VentilationMode.MANUAL,
         }.get(value),
     ),

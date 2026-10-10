@@ -133,7 +133,8 @@ class ComfoConnectFan(FanEntity):
             SENSOR_OPERATING_MODE,
             value,
         )
-        self._attr_preset_mode = VentilationMode.AUTO if value == -1 else VentilationMode.MANUAL
+        # The operating mode is all ones (255) in auto mode.
+        self._attr_preset_mode = VentilationMode.AUTO if value == 255 else VentilationMode.MANUAL
         self.async_write_ha_state()
 
     @property
