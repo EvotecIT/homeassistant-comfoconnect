@@ -52,6 +52,8 @@ SIGNAL_COMFOCONNECT_UPDATE_RECEIVED = "comfoconnect_update_{}_{}"
 SIGNAL_COMFOCONNECT_ALARM_RECEIVED = "comfoconnect_alarm_{}"
 SIGNAL_COMFOCONNECT_AVAILABILITY = "comfoconnect_availability_{}"
 
+EVENT_COMFOCONNECT_ALARM = "comfoconnect_alarm"
+
 KEEP_ALIVE_INTERVAL = timedelta(seconds=30)
 
 
@@ -269,6 +271,15 @@ class ComfoConnectBridge(ComfoConnect):
             return
         self.active_alarms[node_id] = dict(errors)
         dispatcher_send(self.hass, SIGNAL_COMFOCONNECT_ALARM_RECEIVED.format(self.uuid))
+
+        self.hass.bus.async_fire(
+            EVENT_COMFOCONNECT_ALARM,
+            {
+                "bridge_uuid": self.uuid,
+                "node_id": node_id,
+                "errors": [{"id": error_id, "message": error} for error_id, error in errors.items()],
+            },
+        )
 
         message = f"Alarm received for Node {node_id}:\n"
         for error_id, error in errors.items():
