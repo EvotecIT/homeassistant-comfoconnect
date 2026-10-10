@@ -29,6 +29,10 @@ from aiocomfoconnect.sensors import (
     SENSOR_HUMIDITY_EXTRACT,
     SENSOR_HUMIDITY_OUTDOOR,
     SENSOR_HUMIDITY_SUPPLY,
+    SENSOR_NEXT_CHANGE_BYPASS,
+    SENSOR_NEXT_CHANGE_FAN,
+    SENSOR_NEXT_CHANGE_FAN_EXHAUST,
+    SENSOR_NEXT_CHANGE_FAN_SUPPLY,
     SENSOR_POWER_USAGE,
     SENSOR_POWER_USAGE_TOTAL,
     SENSOR_PREHEATER_POWER,
@@ -76,6 +80,14 @@ from . import (
 _LOGGER = logging.getLogger(__name__)
 
 MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=10)
+
+
+NO_SCHEDULED_CHANGE_VALUES = {-1, 0xFFFFFFFF}
+
+
+def _next_change_value(value: int) -> int | None:
+    """Map the bridge no-change sentinel to an unknown HA duration."""
+    return None if value in NO_SCHEDULED_CHANGE_VALUES else value
 
 
 @dataclass
@@ -380,6 +392,50 @@ SENSOR_TYPES = (
         ccb_sensor=SENSORS.get(SENSOR_COMFOCOOL_CONDENSOR_TEMP),
         entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_NEXT_CHANGE_FAN,
+        device_class=SensorDeviceClass.DURATION,
+        name="Fan speed next change",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        icon="mdi:timer-outline",
+        ccb_sensor=SENSORS.get(SENSOR_NEXT_CHANGE_FAN),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        mapping=_next_change_value,
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_NEXT_CHANGE_BYPASS,
+        device_class=SensorDeviceClass.DURATION,
+        name="Bypass next change",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        icon="mdi:timer-outline",
+        ccb_sensor=SENSORS.get(SENSOR_NEXT_CHANGE_BYPASS),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        mapping=_next_change_value,
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_NEXT_CHANGE_FAN_SUPPLY,
+        device_class=SensorDeviceClass.DURATION,
+        name="Supply fan next change",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        icon="mdi:timer-outline",
+        ccb_sensor=SENSORS.get(SENSOR_NEXT_CHANGE_FAN_SUPPLY),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        mapping=_next_change_value,
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_NEXT_CHANGE_FAN_EXHAUST,
+        device_class=SensorDeviceClass.DURATION,
+        name="Exhaust fan next change",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        icon="mdi:timer-outline",
+        ccb_sensor=SENSORS.get(SENSOR_NEXT_CHANGE_FAN_EXHAUST),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        mapping=_next_change_value,
     ),
 )
 
