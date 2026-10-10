@@ -12,6 +12,7 @@ from aiocomfoconnect.exceptions import (
     AioComfoConnectTimeout,
     ComfoConnectError,
     ComfoConnectNotAllowed,
+    ComfoConnectOtherSession,
 )
 from aiocomfoconnect.properties import (
     PROPERTY_FIRMWARE_VERSION,
@@ -213,9 +214,15 @@ class ComfoConnectBridge(ComfoConnect):
         try:
             # A time request acknowledges reachability; keepalive has no response.
             await self.cmd_time_request()
-        except (ComfoConnectNotAllowed, AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable) as err:
+        except (
+            ComfoConnectNotAllowed,
+            ComfoConnectOtherSession,
+            AioComfoConnectNotConnected,
+            AioComfoConnectTimeout,
+            AioComfoConnectNotReachable,
+        ) as err:
             self.set_available(False)
-            if isinstance(err, ComfoConnectNotAllowed):
+            if isinstance(err, (ComfoConnectNotAllowed, ComfoConnectOtherSession)):
                 # TCP can remain open after another client takes the session.
                 await self.disconnect()
             try:
@@ -228,6 +235,10 @@ class ComfoConnectBridge(ComfoConnect):
             except ComfoConnectNotAllowed:
                 await self.disconnect()
                 raise
+            except ComfoConnectOtherSession:
+                await self.disconnect()
+                _LOGGER.debug("The bridge session is still owned by another client. Retrying later...")
+                return
         self.set_available(True)
 
     @callback
