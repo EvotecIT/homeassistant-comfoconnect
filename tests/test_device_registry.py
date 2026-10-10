@@ -64,8 +64,8 @@ async def test_unit_is_connected_through_the_bridge(hass: HomeAssistant) -> None
     assert all("via_device" not in call.kwargs for call in get_or_create.call_args_list)
 
     registry = dr.async_get(hass)
-    bridge_device = registry.async_get_device(identifiers={(DOMAIN, "DEMO0001")})
-    unit_device = registry.async_get_device(identifiers={(DOMAIN, UNIT_UUID)})
+    bridge_device = registry.async_get_device_by_identifier((DOMAIN, "DEMO0001"), entry.entry_id)
+    unit_device = registry.async_get_device_by_identifier((DOMAIN, UNIT_UUID), entry.entry_id)
     assert bridge_device is not None
     assert unit_device is not None
     assert unit_device.via_device_id == bridge_device.id
