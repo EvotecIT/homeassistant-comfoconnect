@@ -36,7 +36,7 @@ This integration supports the following additional features over the existing in
 
 ### Fan speed overrides
 
-With aiocomfoconnect 0.2.1, a temporary fan-speed override can remain active after selecting `auto` until the unit's timer expires.
+Selecting `auto` cancels a temporary fan-speed override and returns control to the unit's automatic schedule.
 
 ### Timed boost and away modes
 
