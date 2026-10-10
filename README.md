@@ -12,6 +12,7 @@ integration in Home Assistant.
 * Control ventilation speed
 * Control ventilation mode (auto / manual)
 * Control ComfoCool mode (auto / off)
+* Show an Active alarms diagnostic binary sensor
 * Show various sensors
 
 This integration supports the following additional features over the existing integration:
