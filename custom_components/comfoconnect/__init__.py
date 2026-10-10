@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 
@@ -199,8 +200,19 @@ class ComfoConnectBridge(ComfoConnect):
         # Latest alarms per node; a node is missing until it has reported.
         self.active_alarms: dict[int, dict[int, str]] = {}
         self.is_available = True
+        self._keepalive_lock = asyncio.Lock()
 
     async def async_keepalive(self, local_uuid: str) -> None:
+        """Run a keepalive, unless the previous one is still busy."""
+        # A recovery can take longer than the keepalive interval. Overlapping runs would
+        # disconnect each other's reconnect, so skip this one instead.
+        if self._keepalive_lock.locked():
+            _LOGGER.debug("Previous keepalive is still running, skipping this one")
+            return
+        async with self._keepalive_lock:
+            await self._async_keepalive(local_uuid)
+
+    async def _async_keepalive(self, local_uuid: str) -> None:
         """Recover the bridge session and restore availability after a reply."""
         try:
             # A time request acknowledges reachability; keepalive has no response.
