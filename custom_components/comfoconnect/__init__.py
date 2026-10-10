@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 
@@ -12,6 +13,7 @@ from aiocomfoconnect.exceptions import (
     AioComfoConnectTimeout,
     ComfoConnectError,
     ComfoConnectNotAllowed,
+    ComfoConnectOtherSession,
 )
 from aiocomfoconnect.properties import (
     PROPERTY_FIRMWARE_VERSION,
@@ -21,7 +23,7 @@ from aiocomfoconnect.properties import (
 from aiocomfoconnect.sensors import Sensor
 from aiocomfoconnect.util import version_decode
 from homeassistant.components import network, persistent_notification
-from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
+from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_HOST, EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import (
@@ -113,18 +115,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except ComfoConnectError as err:
             raise ConfigEntryNotReady from err
 
-    hass.data[DOMAIN][entry.entry_id] = bridge
+    # A failed read must not leave a reconnecting session behind the failed entry.
+    try:
+        bridge_info = await bridge.cmd_version_request()
+        unit_model = await bridge.get_property(PROPERTY_MODEL)
+        unit_firmware = await bridge.get_property(PROPERTY_FIRMWARE_VERSION)
+        unit_name = await bridge.get_property(PROPERTY_NAME)
+    except (ComfoConnectError, AioComfoConnectTimeout, AioComfoConnectNotConnected, AioComfoConnectNotReachable) as err:
+        await bridge.disconnect()
+        raise ConfigEntryNotReady("The bridge did not return its device information") from err
+    except BaseException:
+        # Cancellation or an unexpected read failure also releases the session.
+        await bridge.disconnect()
+        raise
 
-    # Get device information
-    bridge_info = await bridge.cmd_version_request()
-    unit_model = await bridge.get_property(PROPERTY_MODEL)
-    unit_firmware = await bridge.get_property(PROPERTY_FIRMWARE_VERSION)
-    unit_name = await bridge.get_property(PROPERTY_NAME)
+    hass.data[DOMAIN][entry.entry_id] = bridge
 
     device_registry = dr.async_get(hass)
 
     # Add Bridge to device registry
-    device_registry.async_get_or_create(
+    bridge_device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, bridge_info.serialNumber)},
         manufacturer="Zehnder",
@@ -133,30 +143,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         sw_version=version_decode(bridge_info.gatewayVersion),
     )
 
-    # Add Ventilation Unit to device registry
-    device_registry.async_get_or_create(
+    # Add Ventilation Unit to device registry, connected through the bridge. Passing `via_device` to
+    # async_get_or_create is deprecated, and its replacement `via_device_id` only exists there since
+    # Home Assistant 2026.8, so link the devices with async_update_device, which works on all versions.
+    unit_device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, bridge.uuid)},
         manufacturer="Zehnder",
         name=unit_name,
         model=unit_model,
         sw_version=version_decode(unit_firmware),
-        via_device=(DOMAIN, bridge_info.serialNumber),
     )
+    device_registry.async_update_device(unit_device.id, via_device_id=bridge_device.id)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     @callback
     async def send_keepalive(now) -> None:
-        """Send keepalive to the bridge."""
-        await bridge.async_keepalive(entry.data[CONF_LOCAL_UUID])
+        """Check reachability and recover a lost bridge session."""
+        if entry.state is not ConfigEntryState.LOADED:
+            return
+        try:
+            await bridge.async_keepalive(entry.data[CONF_LOCAL_UUID])
+        except ComfoConnectNotAllowed:
+            if entry.state is ConfigEntryState.LOADED:
+                entry.async_start_reauth(hass)
 
     entry.async_on_unload(async_track_time_interval(hass, send_keepalive, KEEP_ALIVE_INTERVAL))
 
     # Disconnect when shutting down
     async def disconnect_bridge(event):
         """Close connection to the bridge."""
-        await bridge.disconnect()
+        await bridge.async_close()
 
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, disconnect_bridge))
 
@@ -167,7 +185,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         bridge = hass.data[DOMAIN][entry.entry_id]
-        await bridge.disconnect()
+        await bridge.async_close()
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
@@ -186,9 +204,11 @@ class ComfoConnectBridge(ComfoConnect):
             self.alarm_callback,
         )
         self.hass = hass
-        self.active_alarm_node_id: int | None = None
-        self.active_alarms: dict[int, str] = {}
+        # Latest alarms per node; a node is missing until it has reported.
+        self.active_alarms: dict[int, dict[int, str]] = {}
         self.is_available = True
+        self._keepalive_lock = asyncio.Lock()
+        self._closing = False
         self.connection_generation = 0
 
     async def cmd_start_session(self, take_over: bool = False):
@@ -197,22 +217,54 @@ class ComfoConnectBridge(ComfoConnect):
         self.connection_generation += 1
         return result
 
+    async def async_close(self) -> None:
+        """Stop keepalive work and close the final session after any active run."""
+        self._closing = True
+        self.set_available(False)
+        async with self._keepalive_lock:
+            await self.disconnect()
+
     async def async_keepalive(self, local_uuid: str) -> None:
-        """Restore availability only after receiving a reply from the bridge."""
-        _LOGGER.debug("Sending keepalive...")
+        """Run a keepalive unless closing or the previous run is still busy."""
+        if self._closing or self._keepalive_lock.locked():
+            return
+        async with self._keepalive_lock:
+            await self._async_keepalive(local_uuid)
+
+    async def _async_keepalive(self, local_uuid: str) -> None:
+        """Recover the bridge session and restore availability after a reply."""
         try:
-            # cmd_keepalive has no response; cmd_time_request proves the bridge is reachable.
+            # A time request acknowledges reachability; keepalive has no response.
             await self.cmd_time_request()
-        except (AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable):
+        except (
+            ComfoConnectNotAllowed,
+            ComfoConnectOtherSession,
+            AioComfoConnectNotConnected,
+            AioComfoConnectTimeout,
+            AioComfoConnectNotReachable,
+        ) as err:
+            if self._closing:
+                return
             self.set_available(False)
+            if isinstance(err, (ComfoConnectNotAllowed, ComfoConnectOtherSession)):
+                # TCP can remain open after another client takes the session.
+                await self.disconnect()
             try:
-                # connect() may return while the library is still retrying in the background.
+                # connect() may return while its background retry is still running.
                 await self.connect(local_uuid)
                 await self.cmd_time_request()
             except (AioComfoConnectNotConnected, AioComfoConnectTimeout, AioComfoConnectNotReachable):
-                _LOGGER.debug("Could not connect to the bridge. Retrying later...")
+                _LOGGER.debug("Could not reach the bridge. Retrying later...")
                 return
-        self.set_available(True)
+            except ComfoConnectNotAllowed:
+                await self.disconnect()
+                raise
+            except ComfoConnectOtherSession:
+                await self.disconnect()
+                _LOGGER.debug("The bridge session is still owned by another client. Retrying later...")
+                return
+        if not self._closing:
+            self.set_available(True)
 
     @callback
     def set_available(self, available: bool) -> None:
@@ -233,14 +285,13 @@ class ComfoConnectBridge(ComfoConnect):
         )
 
     @callback
-    def alarm_callback(self, node_id, errors):
+    def alarm_callback(self, node_id: int, errors: dict[int, str]) -> None:
         """Handle alarm updates."""
-        if self.active_alarm_node_id == node_id and self.active_alarms == errors:
+        if self.active_alarms.get(node_id) == errors:
             return
 
-        self.active_alarm_node_id = node_id
-        self.active_alarms = errors.copy()
-        errors = self.active_alarms
+        self.active_alarms[node_id] = dict(errors)
+        errors = self.active_alarms[node_id]
 
         event_data = {
             "bridge_uuid": self.uuid,
@@ -251,18 +302,16 @@ class ComfoConnectBridge(ComfoConnect):
         dispatcher_send(
             self.hass,
             SIGNAL_COMFOCONNECT_ALARM_RECEIVED.format(self.uuid),
-            node_id,
-            errors,
         )
         self.hass.bus.async_fire(EVENT_COMFOCONNECT_ALARM, event_data)
 
         notification_id = PERSISTENT_NOTIFICATION_ID.format(self.uuid)
-        if not errors:
+        if not any(self.active_alarms.values()):
             _LOGGER.info("Alarms cleared for Node %s", node_id)
             persistent_notification.async_dismiss(self.hass, notification_id)
             return
 
-        title, message = self._format_alarm_notification(node_id, errors)
+        title, message = self._format_alarm_notification(self.active_alarms)
 
         _LOGGER.info(message)
         persistent_notification.async_create(
@@ -273,19 +322,13 @@ class ComfoConnectBridge(ComfoConnect):
         )
 
     @staticmethod
-    def _format_alarm_notification(node_id: int, errors: dict[int, str]) -> tuple[str, str]:
-        """Format active alarms for Home Assistant notifications."""
-        is_recheck = set(errors) == {ALARM_RECHECK_ERROR_ID}
+    def _format_alarm_notification(alarms: dict[int, dict[int, str]]) -> tuple[str, str]:
+        """Format all active node alarms for the bridge's notification."""
+        is_recheck = {error_id for errors in alarms.values() for error_id in errors} == {ALARM_RECHECK_ERROR_ID}
         title = "ComfoConnect is checking alarms" if is_recheck else "ComfoConnect needs attention"
         intro = "The ventilation unit is checking whether alarms are still active." if is_recheck else "The ventilation unit reported active alarms."
-        alarm_lines = [f"- **{error_id}**: {error}" for error_id, error in errors.items()]
-        message = "\n".join(
-            [
-                intro,
-                "",
-                f"Node: {node_id}",
-                "",
-                *alarm_lines,
-            ]
-        )
-        return title, message
+        lines = [intro]
+        for node_id, errors in sorted(alarms.items()):
+            if errors:
+                lines.extend(["", f"Node: {node_id}", "", *[f"- **{error_id}**: {error}" for error_id, error in errors.items()]])
+        return title, "\n".join(lines)

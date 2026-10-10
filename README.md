@@ -4,7 +4,7 @@
 
 This is a custom integration for Home Assistant to integrate with the Zehnder ComfoAirQ ventilation system. It's using the [aiocomfoconnect](https://github.com/michaelarnauts/aiocomfoconnect) library.
 
-This EvotecIT fork combines alarm notifications with advanced controls and diagnostics on `master`. The changes are also maintained as separate upstream contributions: [alarm notifications](https://github.com/michaelarnauts/home-assistant-comfoconnect/pull/151) and [advanced controls](https://github.com/michaelarnauts/home-assistant-comfoconnect/pull/152).
+This EvotecIT fork combines alarm notifications with advanced controls and diagnostics. The changes are also maintained as focused upstream contributions, including the [active-alarm sensor](https://github.com/michaelarnauts/home-assistant-comfoconnect/pull/151), [ventilation controls](https://github.com/michaelarnauts/home-assistant-comfoconnect/pull/152), and [session recovery](https://github.com/michaelarnauts/home-assistant-comfoconnect/pull/179).
 
 This custom integration is an upgrade over the existing `comfoconnect` integration and is meant for testing purposes. The goal is eventually to replace the existing `comfoconnect`
 integration in Home Assistant.
@@ -15,8 +15,10 @@ integration in Home Assistant.
 * Control ventilation mode (auto / manual)
 * Control ComfoCool mode (auto / off)
 * Control timed boost and away modes
-* Configure sensor based ventilation modes
 * Configure advanced airflow and temperature targets
+* Show yearly energy totals and avoided heating/cooling measurements
+* Show an Active alarms diagnostic binary sensor
+* Configure passive-temperature and humidity ventilation controls
 * Show various sensors
 * Show extended diagnostic and energy sensors
 
@@ -34,7 +36,7 @@ This integration supports the following additional features over the existing in
 
 ### Fan speed overrides
 
-With aiocomfoconnect 0.2.1, a temporary fan-speed override can remain active after selecting `auto` until the unit's timer expires.
+Selecting `auto` cancels a temporary fan-speed override and returns control to the unit's automatic schedule.
 
 ### Timed boost and away modes
 

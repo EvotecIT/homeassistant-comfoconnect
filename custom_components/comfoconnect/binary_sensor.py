@@ -157,7 +157,7 @@ class ComfoConnectBinarySensor(BinarySensorEntity):
             value,
         )
 
-        self._attr_is_on = True if value else False
+        self._attr_is_on = bool(value)
         self.async_write_ha_state()
 
 
@@ -173,8 +173,6 @@ class ComfoConnectAlarmBinarySensor(BinarySensorEntity):
     def __init__(self, ccb: ComfoConnectBridge) -> None:
         """Initialize the ComfoConnect alarm sensor."""
         self._ccb = ccb
-        self._node_id = ccb.active_alarm_node_id
-        self._errors = ccb.active_alarms
         self._attr_unique_id = f"{self._ccb.uuid}-active_alarms"
         self._attr_available = ccb.is_available
         self._attr_device_info = DeviceInfo(
@@ -198,6 +196,9 @@ class ComfoConnectAlarmBinarySensor(BinarySensorEntity):
                 self._handle_availability_update,
             )
         )
+        # Alarms can arrive before the entity is added, so read the cache again after subscribing.
+        self._attr_available = self._ccb.is_available
+        self._update_state()
 
     @callback
     def _handle_availability_update(self, available: bool) -> None:
@@ -205,23 +206,19 @@ class ComfoConnectAlarmBinarySensor(BinarySensorEntity):
         self._attr_available = available
         self.async_write_ha_state()
 
-    @property
-    def extra_state_attributes(self) -> dict:
-        """Return alarm details."""
-        return {
-            "node_id": self._node_id,
-            "alarm_count": len(self._errors),
-            "alarms": [{"id": error_id, "message": error} for error_id, error in self._errors.items()],
-        }
-
     @callback
-    def _handle_update(self, node_id: int, errors: dict[int, str]) -> None:
+    def _handle_update(self) -> None:
         """Handle alarm update callbacks."""
-        self._node_id = node_id
-        self._errors = errors
         self._update_state()
         self.async_write_ha_state()
 
     def _update_state(self) -> None:
-        """Update the active alarm state."""
-        self._attr_is_on = bool(self._errors)
+        """Update the active alarm state from the bridge cache."""
+        alarms = [
+            {"node_id": node_id, "id": error_id, "message": error}
+            for node_id, errors in sorted(self._ccb.active_alarms.items())
+            for error_id, error in errors.items()
+        ]
+        # Unknown until a node has reported its alarms.
+        self._attr_is_on = bool(alarms) if self._ccb.active_alarms else None
+        self._attr_extra_state_attributes = {"alarm_count": len(alarms), "alarms": alarms}
