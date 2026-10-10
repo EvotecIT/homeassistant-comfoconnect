@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from aiocomfoconnect.exceptions import AioComfoConnectNotConnected, AioComfoConnectTimeout, ComfoConnectNotAllowed
+from aiocomfoconnect.exceptions import AioComfoConnectNotConnected, AioComfoConnectTimeout, ComfoConnectNotAllowed, ComfoConnectOtherSession
 from custom_components.comfoconnect import SIGNAL_COMFOCONNECT_AVAILABILITY, ComfoConnectBridge, async_setup_entry
 from custom_components.comfoconnect.const import CONF_LOCAL_UUID, CONF_UUID
 from homeassistant.core import HomeAssistant, callback
@@ -41,8 +41,11 @@ def test_background_reconnect_waits_for_a_reply_before_becoming_available(tmp_pa
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("recovery_error", [None, AioComfoConnectTimeout("Timed out"), ComfoConnectNotAllowed("Refused")])
-def test_refused_session_is_closed_and_recovery_controls_availability(tmp_path, recovery_error):
+@pytest.mark.parametrize("initial_error", [ComfoConnectNotAllowed("Lost session"), ComfoConnectOtherSession("Other client")])
+@pytest.mark.parametrize(
+    "recovery_error", [None, AioComfoConnectTimeout("Timed out"), ComfoConnectNotAllowed("Refused"), ComfoConnectOtherSession("Other client")]
+)
+def test_refused_session_is_closed_and_recovery_controls_availability(tmp_path, initial_error, recovery_error):
     """A refused open TCP session is replaced; persistent refusal reaches reauth."""
 
     async def scenario():
@@ -50,14 +53,14 @@ def test_refused_session_is_closed_and_recovery_controls_availability(tmp_path, 
         bridge = ComfoConnectBridge(hass, "127.0.0.1", "test-bridge")
         bridge.disconnect = AsyncMock()
         bridge.connect = AsyncMock()
-        bridge.cmd_time_request = AsyncMock(side_effect=[ComfoConnectNotAllowed("Lost session"), recovery_error])
+        bridge.cmd_time_request = AsyncMock(side_effect=[initial_error, recovery_error])
         if isinstance(recovery_error, ComfoConnectNotAllowed):
             with pytest.raises(ComfoConnectNotAllowed):
                 await bridge.async_keepalive("local")
             assert bridge.disconnect.await_count == 2
         else:
             await bridge.async_keepalive("local")
-            bridge.disconnect.assert_awaited_once()
+            assert bridge.disconnect.await_count == (2 if isinstance(recovery_error, ComfoConnectOtherSession) else 1)
         bridge.connect.assert_awaited_once_with("local")
         assert bridge.is_available is (recovery_error is None)
 
