@@ -13,10 +13,12 @@ aiocomfoconnect = "0.2.1"
 [tool.poetry.group.dev.dependencies]
 homeassistant = "^2024.11.0b1"
 pytest = "^8.3"
+pytest-homeassistant-custom-component = "0.13.195"
 ruff = "^0.5.2"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [build-system]
 requires = ["poetry-core"]
