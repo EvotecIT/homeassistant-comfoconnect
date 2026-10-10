@@ -18,6 +18,7 @@ from aiocomfoconnect.sensors import (
     SENSOR_COMFOFOND_GHE_STATE,
     SENSOR_COMFOFOND_TEMP_GROUND,
     SENSOR_COMFOFOND_TEMP_OUTDOOR,
+    SENSOR_COMFORTCONTROL_MODE,
     SENSOR_DAYS_TO_REPLACE_FILTER,
     SENSOR_FAN_EXHAUST_DUTY,
     SENSOR_FAN_EXHAUST_FLOW,
@@ -76,6 +77,13 @@ from . import (
 _LOGGER = logging.getLogger(__name__)
 
 MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=10)
+
+
+COMFORT_CONTROL_STATE = {
+    0: "disabled",
+    1: "active",
+    2: "overruling",
+}
 
 
 @dataclass
@@ -380,6 +388,15 @@ SENSOR_TYPES = (
         ccb_sensor=SENSORS.get(SENSOR_COMFOCOOL_CONDENSOR_TEMP),
         entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_COMFORTCONTROL_MODE,
+        name="Sensor based ventilation state",
+        icon="mdi:auto-fix",
+        ccb_sensor=SENSORS.get(SENSOR_COMFORTCONTROL_MODE),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        mapping=lambda x: COMFORT_CONTROL_STATE.get(x, x),
     ),
 )
 
