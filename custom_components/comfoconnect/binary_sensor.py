@@ -16,6 +16,7 @@ from aiocomfoconnect.sensors import (
     Sensor as AioComfoConnectSensor,
 )
 from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
@@ -27,6 +28,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import (
     DOMAIN,
+    SIGNAL_COMFOCONNECT_ALARM_RECEIVED,
     SIGNAL_COMFOCONNECT_AVAILABILITY,
     SIGNAL_COMFOCONNECT_UPDATE_RECEIVED,
     ComfoConnectBridge,
@@ -88,6 +90,7 @@ async def async_setup_entry(
     ccb = hass.data[DOMAIN][config_entry.entry_id]
 
     sensors = [ComfoConnectBinarySensor(ccb=ccb, config_entry=config_entry, description=description) for description in SENSOR_TYPES]
+    sensors.append(ComfoConnectAlarmBinarySensor(ccb=ccb))
 
     async_add_entities(sensors, True)
 
@@ -154,5 +157,68 @@ class ComfoConnectBinarySensor(BinarySensorEntity):
             value,
         )
 
-        self._attr_is_on = True if value else False
+        self._attr_is_on = bool(value)
         self.async_write_ha_state()
+
+
+class ComfoConnectAlarmBinarySensor(BinarySensorEntity):
+    """Representation of active ComfoConnect alarms."""
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_name = "Active alarms"
+    _attr_should_poll = False
+
+    def __init__(self, ccb: ComfoConnectBridge) -> None:
+        """Initialize the ComfoConnect alarm sensor."""
+        self._ccb = ccb
+        self._attr_unique_id = f"{self._ccb.uuid}-active_alarms"
+        self._attr_available = ccb.is_available
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._ccb.uuid)},
+        )
+        self._update_state()
+
+    async def async_added_to_hass(self) -> None:
+        """Register for alarm updates."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                SIGNAL_COMFOCONNECT_ALARM_RECEIVED.format(self._ccb.uuid),
+                self._handle_update,
+            )
+        )
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                SIGNAL_COMFOCONNECT_AVAILABILITY.format(self._ccb.uuid),
+                self._handle_availability_update,
+            )
+        )
+        # Alarms can arrive before the entity is added, so read the cache again after subscribing.
+        self._attr_available = self._ccb.is_available
+        self._update_state()
+
+    @callback
+    def _handle_availability_update(self, available: bool) -> None:
+        """Handle bridge availability changes."""
+        self._attr_available = available
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_update(self) -> None:
+        """Handle alarm update callbacks."""
+        self._update_state()
+        self.async_write_ha_state()
+
+    def _update_state(self) -> None:
+        """Update the active alarm state from the bridge cache."""
+        alarms = [
+            {"node_id": node_id, "id": error_id, "message": error}
+            for node_id, errors in sorted(self._ccb.active_alarms.items())
+            for error_id, error in errors.items()
+        ]
+        # Unknown until a node has reported its alarms.
+        self._attr_is_on = bool(alarms) if self._ccb.active_alarms else None
+        self._attr_extra_state_attributes = {"alarm_count": len(alarms), "alarms": alarms}

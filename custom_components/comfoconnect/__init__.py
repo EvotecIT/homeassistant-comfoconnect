@@ -47,6 +47,7 @@ PLATFORMS: list[Platform] = [
 _LOGGER = logging.getLogger(__name__)
 
 SIGNAL_COMFOCONNECT_UPDATE_RECEIVED = "comfoconnect_update_{}_{}"
+SIGNAL_COMFOCONNECT_ALARM_RECEIVED = "comfoconnect_alarm_{}"
 SIGNAL_COMFOCONNECT_AVAILABILITY = "comfoconnect_availability_{}"
 
 KEEP_ALIVE_INTERVAL = timedelta(seconds=30)
@@ -127,7 +128,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     device_registry = dr.async_get(hass)
 
     # Add Bridge to device registry
-    device_registry.async_get_or_create(
+    bridge_device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, bridge_info.serialNumber)},
         manufacturer="Zehnder",
@@ -136,16 +137,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         sw_version=version_decode(bridge_info.gatewayVersion),
     )
 
-    # Add Ventilation Unit to device registry
-    device_registry.async_get_or_create(
+    # Add Ventilation Unit to device registry, connected through the bridge. Passing `via_device` to
+    # async_get_or_create is deprecated, and its replacement `via_device_id` only exists there since
+    # Home Assistant 2026.8, so link the devices with async_update_device, which works on all versions.
+    unit_device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, bridge.uuid)},
         manufacturer="Zehnder",
         name=unit_name,
         model=unit_model,
         sw_version=version_decode(unit_firmware),
-        via_device=(DOMAIN, bridge_info.serialNumber),
     )
+    device_registry.async_update_device(unit_device.id, via_device_id=bridge_device.id)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -202,6 +205,8 @@ class ComfoConnectBridge(ComfoConnect):
             self.alarm_callback,
         )
         self.hass = hass
+        # Latest alarms per node; a node is missing until it has reported.
+        self.active_alarms: dict[int, dict[int, str]] = {}
         self.is_available = True
 
     @callback
@@ -223,8 +228,13 @@ class ComfoConnectBridge(ComfoConnect):
         )
 
     @callback
-    def alarm_callback(self, node_id, errors):
-        """Print alarm updates."""
+    def alarm_callback(self, node_id: int, errors: dict[int, str]) -> None:
+        """Cache changed alarms and notify the diagnostic sensor."""
+        if self.active_alarms.get(node_id) == errors:
+            return
+        self.active_alarms[node_id] = dict(errors)
+        dispatcher_send(self.hass, SIGNAL_COMFOCONNECT_ALARM_RECEIVED.format(self.uuid))
+
         message = f"Alarm received for Node {node_id}:\n"
         for error_id, error in errors.items():
             message += f"* {error_id}: {error}\n"

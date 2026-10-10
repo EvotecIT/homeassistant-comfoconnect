@@ -62,7 +62,6 @@ class ComfoConnectFan(FanEntity):
     _attr_icon = "mdi:air-conditioner"
     _attr_should_poll = False
     _attr_supported_features = FanEntityFeature.SET_SPEED | FanEntityFeature.PRESET_MODE | FanEntityFeature.TURN_ON | FanEntityFeature.TURN_OFF
-    _attr_preset_modes = list(PRESET_MODES)
     _attr_speed_count = len(FAN_SPEEDS)
     _attr_has_entity_name = True
     _attr_name = None
@@ -72,6 +71,7 @@ class ComfoConnectFan(FanEntity):
         self._ccb = ccb
         self._attr_unique_id = self._ccb.uuid
         self._attr_preset_mode = None
+        self._attr_preset_modes = list(PRESET_MODES)
         self._attr_available = ccb.is_available
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._ccb.uuid)},
@@ -133,7 +133,8 @@ class ComfoConnectFan(FanEntity):
             SENSOR_OPERATING_MODE,
             value,
         )
-        self._attr_preset_mode = VentilationMode.AUTO if value == -1 else VentilationMode.MANUAL
+        # The operating mode is all ones (255) in auto mode.
+        self._attr_preset_mode = VentilationMode.AUTO if value == 255 else VentilationMode.MANUAL
         self.async_write_ha_state()
 
     @property

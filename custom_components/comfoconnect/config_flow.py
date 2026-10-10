@@ -111,7 +111,7 @@ class ComfoConnectConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required(CONF_HOST): str}),
         )
 
-    async def _register(self, pin: int = None) -> FlowResult:
+    async def _register(self, pin: int | None = None) -> FlowResult:
         """Register on the bridge."""
 
         if self.local_uuid is None:
@@ -123,7 +123,7 @@ class ComfoConnectConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # and registers us when we are not.
             await self.bridge.register(
                 self.local_uuid,
-                "Home Assistant (%s)" % self.hass.config.location_name,
+                f"Home Assistant ({self.hass.config.location_name})",
                 pin or DEFAULT_PIN,
             )
 
