@@ -17,6 +17,7 @@ integration in Home Assistant.
 * Configure passive-temperature and humidity ventilation controls
 
 * Configure heating and cooling RMOT thresholds
+* Configure commissioned airflow targets
 * Show various sensors
 
 This integration supports the following additional features over the existing integration:
@@ -38,6 +39,10 @@ Choose a duration in Boost Mode to start a timer. Choose `Off`, or use Cancel bo
 ### RMOT thresholds
 
 Heating and cooling running mean outdoor temperature (RMOT) thresholds are available as disabled-by-default number entities. They use the unit's own minimum, maximum, and step values and become available after those constraints are read successfully.
+
+### Airflow targets
+
+Airflow targets are disabled by default and use the unit's own ranges and steps. Changing a target overwrites the installer's commissioned setting for that speed. Record the existing values and consult your installer before changing them, since these settings affect the ventilation balance.
 
 ## Installation
 

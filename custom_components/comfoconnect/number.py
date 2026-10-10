@@ -8,7 +8,9 @@ from time import monotonic
 
 from aiocomfoconnect.const import (
     UNIT_TEMPHUMCONTROL,
+    UNIT_VENTILATIONCONFIG,
     PdoType,
+    VentilationSpeed,
 )
 from aiocomfoconnect.exceptions import (
     AioComfoConnectNotConnected,
@@ -18,7 +20,7 @@ from aiocomfoconnect.exceptions import (
 )
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberEntityDescription, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import UnitOfTemperature, UnitOfVolumeFlowRate
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -49,9 +51,58 @@ class ComfoConnectNumberEntityDescription(NumberEntityDescription, ComfoConnectN
     """Describes a ComfoConnect number entity."""
 
     scale: int = 1
+    speed: str | None = None
 
 
 NUMBER_TYPES = (
+    ComfoConnectNumberEntityDescription(
+        key="airflow_away",
+        name="Away airflow target",
+        icon="mdi:fan-speed-1",
+        native_unit_of_measurement=UnitOfVolumeFlowRate.CUBIC_METERS_PER_HOUR,
+        mode=NumberMode.BOX,
+        unit=UNIT_VENTILATIONCONFIG,
+        subunit=1,
+        property_id=3,
+        property_type=PdoType.TYPE_CN_INT16,
+        speed=VentilationSpeed.AWAY,
+    ),
+    ComfoConnectNumberEntityDescription(
+        key="airflow_low",
+        name="Low airflow target",
+        icon="mdi:fan-speed-1",
+        native_unit_of_measurement=UnitOfVolumeFlowRate.CUBIC_METERS_PER_HOUR,
+        mode=NumberMode.BOX,
+        unit=UNIT_VENTILATIONCONFIG,
+        subunit=1,
+        property_id=4,
+        property_type=PdoType.TYPE_CN_INT16,
+        speed=VentilationSpeed.LOW,
+    ),
+    ComfoConnectNumberEntityDescription(
+        key="airflow_medium",
+        name="Medium airflow target",
+        icon="mdi:fan-speed-2",
+        native_unit_of_measurement=UnitOfVolumeFlowRate.CUBIC_METERS_PER_HOUR,
+        mode=NumberMode.BOX,
+        unit=UNIT_VENTILATIONCONFIG,
+        subunit=1,
+        property_id=5,
+        property_type=PdoType.TYPE_CN_INT16,
+        speed=VentilationSpeed.MEDIUM,
+    ),
+    ComfoConnectNumberEntityDescription(
+        key="airflow_high",
+        name="High airflow target",
+        icon="mdi:fan-speed-3",
+        native_unit_of_measurement=UnitOfVolumeFlowRate.CUBIC_METERS_PER_HOUR,
+        mode=NumberMode.BOX,
+        unit=UNIT_VENTILATIONCONFIG,
+        subunit=1,
+        property_id=6,
+        property_type=PdoType.TYPE_CN_INT16,
+        speed=VentilationSpeed.HIGH,
+    ),
     ComfoConnectNumberEntityDescription(
         key="rmot_heating",
         name="Heating RMOT threshold",
@@ -192,13 +243,16 @@ class ComfoConnectNumber(NumberEntity):
         previous_value = self.native_value
         generation = self._ccb.connection_generation
 
-        await self._ccb.set_property_typed(
-            self.entity_description.unit,
-            self.entity_description.subunit,
-            self.entity_description.property_id,
-            encoded_value,
-            self.entity_description.property_type,
-        )
+        if self.entity_description.speed:
+            await self._ccb.set_flow_for_speed(self.entity_description.speed, encoded_value)
+        else:
+            await self._ccb.set_property_typed(
+                self.entity_description.unit,
+                self.entity_description.subunit,
+                self.entity_description.property_id,
+                encoded_value,
+                self.entity_description.property_type,
+            )
 
         now = monotonic()
         stale_values: set[float] = set()
