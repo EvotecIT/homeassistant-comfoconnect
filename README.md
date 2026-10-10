@@ -17,6 +17,7 @@ integration in Home Assistant.
 * Configure passive-temperature and humidity ventilation controls
 
 * Configure heating and cooling RMOT thresholds
+* Configure fixed temperature-profile targets
 * Show various sensors
 
 This integration supports the following additional features over the existing integration:
@@ -38,6 +39,10 @@ Choose a duration in Boost Mode to start a timer. Choose `Off`, or use Cancel bo
 ### RMOT thresholds
 
 Heating and cooling running mean outdoor temperature (RMOT) thresholds are available as disabled-by-default number entities. They use the unit's own minimum, maximum, and step values and become available after those constraints are read successfully.
+
+### Fixed temperature-profile targets
+
+Warm, Normal, and Cool target temperatures are disabled-by-default number entities. They configure the fixed presets and apply when temperature regulation is set to `FIXED` on the unit's display. In `ADAPTIVE` mode the unit calculates its target from RMOT. The Temperature Profile select chooses a preset independently of regulation mode.
 
 ## Installation
 
