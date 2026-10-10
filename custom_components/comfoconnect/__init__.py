@@ -22,7 +22,7 @@ from aiocomfoconnect.properties import (
 )
 from aiocomfoconnect.sensors import Sensor
 from aiocomfoconnect.util import version_decode
-from homeassistant.components import network
+from homeassistant.components import network, persistent_notification
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.const import CONF_HOST, EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant, callback
@@ -51,6 +51,9 @@ _LOGGER = logging.getLogger(__name__)
 SIGNAL_COMFOCONNECT_UPDATE_RECEIVED = "comfoconnect_update_{}_{}"
 SIGNAL_COMFOCONNECT_ALARM_RECEIVED = "comfoconnect_alarm_{}"
 SIGNAL_COMFOCONNECT_AVAILABILITY = "comfoconnect_availability_{}"
+
+PERSISTENT_NOTIFICATION_ID = "comfoconnect_alarm_{}"
+ALARM_RECHECK_ERROR_ID = 100
 
 KEEP_ALIVE_INTERVAL = timedelta(seconds=30)
 
@@ -270,7 +273,30 @@ class ComfoConnectBridge(ComfoConnect):
         self.active_alarms[node_id] = dict(errors)
         dispatcher_send(self.hass, SIGNAL_COMFOCONNECT_ALARM_RECEIVED.format(self.uuid))
 
-        message = f"Alarm received for Node {node_id}:\n"
-        for error_id, error in errors.items():
-            message += f"* {error_id}: {error}\n"
+        notification_id = PERSISTENT_NOTIFICATION_ID.format(self.uuid)
+        if not any(self.active_alarms.values()):
+            _LOGGER.info("Alarms cleared for Node %s", node_id)
+            persistent_notification.async_dismiss(self.hass, notification_id)
+            return
+
+        title, message = self._format_alarm_notification(self.active_alarms)
+
         _LOGGER.warning(message)
+        persistent_notification.async_create(
+            self.hass,
+            message,
+            title=title,
+            notification_id=notification_id,
+        )
+
+    @staticmethod
+    def _format_alarm_notification(alarms: dict[int, dict[int, str]]) -> tuple[str, str]:
+        """Format all active node alarms for the bridge's notification."""
+        is_recheck = {error_id for errors in alarms.values() for error_id in errors} == {ALARM_RECHECK_ERROR_ID}
+        title = "ComfoConnect is checking alarms" if is_recheck else "ComfoConnect needs attention"
+        intro = "The ventilation unit is checking whether alarms are still active." if is_recheck else "The ventilation unit reported active alarms."
+        lines = [intro]
+        for node_id, errors in sorted(alarms.items()):
+            if errors:
+                lines.extend(["", f"Node: {node_id}", "", *[f"- **{error_id}**: {error}" for error_id, error in errors.items()]])
+        return title, "\n".join(lines)
