@@ -14,7 +14,7 @@ aiocomfoconnect = "0.3.0"
 homeassistant = "2026.10.0"
 pytest = "^9.0"
 pytest-homeassistant-custom-component = "0.13.371"
-ruff = "^0.5.2"
+ruff = "^0.17.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
