@@ -198,6 +198,11 @@ class ComfoConnectAlarmBinarySensor(BinarySensorEntity):
                 self._handle_availability_update,
             )
         )
+        # Use the current snapshot after subscribing; construction may precede addition.
+        self._node_id = self._ccb.active_alarm_node_id
+        self._errors = self._ccb.active_alarms
+        self._attr_available = self._ccb.is_available
+        self._update_state()
 
     @callback
     def _handle_availability_update(self, available: bool) -> None:
@@ -224,4 +229,4 @@ class ComfoConnectAlarmBinarySensor(BinarySensorEntity):
 
     def _update_state(self) -> None:
         """Update the active alarm state."""
-        self._attr_is_on = bool(self._errors)
+        self._attr_is_on = bool(self._errors) if self._node_id is not None else None

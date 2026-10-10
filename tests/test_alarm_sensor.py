@@ -3,6 +3,7 @@
 import asyncio
 from unittest.mock import Mock, patch
 
+import pytest
 from custom_components.comfoconnect import ComfoConnectBridge
 from custom_components.comfoconnect.binary_sensor import ComfoConnectAlarmBinarySensor
 from homeassistant.core import HomeAssistant
@@ -36,6 +37,37 @@ def test_alarm_changes_and_clear_publish_sensor_state(tmp_path):
             assert state.attributes["alarm_count"] == 0
             bridge.set_available(False)
             assert hass.states.get(entity.entity_id).state == "unavailable"
+        finally:
+            await entity.async_will_remove_from_hass()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "initial,current,expected",
+    [(None, None, "unknown"), (None, {79: "Replace filters"}, "on"), ({79: "Replace filters"}, {}, "off")],
+)
+def test_alarm_subscription_uses_the_current_snapshot(tmp_path, initial, current, expected):
+    """An unreceived snapshot is unknown; subscription uses the latest known alarms."""
+
+    async def scenario():
+        hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
+        bridge = ComfoConnectBridge(hass, "127.0.0.1", "test-bridge")
+        if initial is not None:
+            bridge.alarm_callback(1, initial)
+        entity = ComfoConnectAlarmBinarySensor(bridge)
+        entity.hass = hass
+        entity.entity_id = "binary_sensor.alarms"
+        if current is not None:
+            bridge.alarm_callback(2, current)
+        await hass.async_block_till_done()
+        await entity.async_added_to_hass()
+        try:
+            entity.async_write_ha_state()
+            state = hass.states.get(entity.entity_id)
+            assert state.state == expected
+            assert state.attributes["node_id"] == (2 if current is not None else None)
         finally:
             await entity.async_will_remove_from_hass()
 
