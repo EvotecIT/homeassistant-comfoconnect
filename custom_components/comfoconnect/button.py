@@ -38,6 +38,13 @@ BUTTON_TYPES = (
         name="Reset errors",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    ComfoconnectButtonEntityDescription(
+        key="cancel_boost",
+        press_fn=lambda ccb, option: cast(Coroutine, ccb.set_boost(False)),
+        name="Cancel boost",
+        icon="mdi:fan-off",
+        entity_category=EntityCategory.CONFIG,
+    ),
 )
 
 

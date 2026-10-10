@@ -57,6 +57,36 @@ class ComfoconnectSelectEntityDescription(SelectEntityDescription, ComfoconnectS
     sensor_value_fn: Callable[[str], Any] = None
 
 
+TIMER_OFF = "Off"
+TIMER_ACTIVE = "Active"
+TIMEOUT_OPTIONS = ("10 Minutes", "20 Minutes", "30 Minutes", "40 Minutes", "50 Minutes", "60 Minutes")
+TIMER_OPTIONS = (TIMER_OFF, TIMER_ACTIVE, *TIMEOUT_OPTIONS)
+
+
+def _timeout_seconds(option: str) -> int:
+    """Convert a timeout option to seconds."""
+    duration, unit = option.split()
+    return int(duration) * {"Minutes": 60, "Hours": 3600, "Days": 86400}[unit]
+
+
+def _timer_option(active: bool) -> str:
+    """Map a timer state to a select option."""
+    return TIMER_ACTIVE if active else TIMER_OFF
+
+
+async def _set_boost_option(ccb: ComfoConnectBridge, option: str) -> None:
+    """Set or cancel boost mode from a select option."""
+    if option == TIMER_OFF:
+        await ccb.set_boost(False)
+    elif option != TIMER_ACTIVE:
+        await ccb.set_boost(True, _timeout_seconds(option))
+
+
+async def _get_boost_option(ccb: ComfoConnectBridge) -> str:
+    """Return the current boost select option."""
+    return _timer_option(await ccb.get_boost())
+
+
 SELECT_TYPES = (
     ComfoconnectSelectEntityDescription(
         key="select_mode",
@@ -147,9 +177,48 @@ SELECT_TYPES = (
         key="boost_timeout",
         name="Boost Mode",
         icon="mdi:fan-plus",
-        get_value_fn=lambda ccb: cast(Coroutine, ccb.get_boost()),
-        set_value_fn=lambda ccb, option: cast(Coroutine, ccb.set_boost(True, int(option.split()[0]) * 60)),
-        options=["10 Minutes", "20 Minutes", "30 Minutes", "40 Minutes", "50 Minutes", "60 Minutes"],
+        get_value_fn=_get_boost_option,
+        set_value_fn=_set_boost_option,
+        options=list(TIMER_OPTIONS),
+    ),
+    ComfoconnectSelectEntityDescription(
+        key="sensor_ventmode_temperature_passive",
+        name="Temperature sensor ventilation",
+        icon="mdi:thermometer-auto",
+        entity_category=EntityCategory.CONFIG,
+        get_value_fn=lambda ccb: cast(Coroutine, ccb.get_sensor_ventmode_temperature_passive()),
+        set_value_fn=lambda ccb, option: cast(Coroutine, ccb.set_sensor_ventmode_temperature_passive(option)),
+        options=[
+            VentilationSetting.AUTO,
+            VentilationSetting.ON,
+            VentilationSetting.OFF,
+        ],
+    ),
+    ComfoconnectSelectEntityDescription(
+        key="sensor_ventmode_humidity_comfort",
+        name="Humidity comfort ventilation",
+        icon="mdi:water-percent",
+        entity_category=EntityCategory.CONFIG,
+        get_value_fn=lambda ccb: cast(Coroutine, ccb.get_sensor_ventmode_humidity_comfort()),
+        set_value_fn=lambda ccb, option: cast(Coroutine, ccb.set_sensor_ventmode_humidity_comfort(option)),
+        options=[
+            VentilationSetting.AUTO,
+            VentilationSetting.ON,
+            VentilationSetting.OFF,
+        ],
+    ),
+    ComfoconnectSelectEntityDescription(
+        key="sensor_ventmode_humidity_protection",
+        name="Humidity protection ventilation",
+        icon="mdi:water-alert",
+        entity_category=EntityCategory.CONFIG,
+        get_value_fn=lambda ccb: cast(Coroutine, ccb.get_sensor_ventmode_humidity_protection()),
+        set_value_fn=lambda ccb, option: cast(Coroutine, ccb.set_sensor_ventmode_humidity_protection(option)),
+        options=[
+            VentilationSetting.AUTO,
+            VentilationSetting.ON,
+            VentilationSetting.OFF,
+        ],
     ),
 )
 
@@ -242,5 +311,12 @@ class ComfoConnectSelect(SelectEntity):
     async def async_select_option(self, option: str) -> None:
         """Set the selected option."""
         await self.entity_description.set_value_fn(self._ccb, option)
-        self._attr_current_option = option
+        if TIMER_ACTIVE in self.entity_description.options:
+            if option == TIMER_ACTIVE:
+                # Active only reports status; selecting it must not invent a timer.
+                self._attr_current_option = await self.entity_description.get_value_fn(self._ccb)
+            else:
+                self._attr_current_option = TIMER_OFF if option == TIMER_OFF else TIMER_ACTIVE
+        else:
+            self._attr_current_option = option
         self.async_write_ha_state()

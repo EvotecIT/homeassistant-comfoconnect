@@ -108,13 +108,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except ComfoConnectError as err:
             raise ConfigEntryNotReady from err
 
-    hass.data[DOMAIN][entry.entry_id] = bridge
+    # A failed read must not leave a reconnecting session behind the failed entry.
+    try:
+        bridge_info = await bridge.cmd_version_request()
+        unit_model = await bridge.get_property(PROPERTY_MODEL)
+        unit_firmware = await bridge.get_property(PROPERTY_FIRMWARE_VERSION)
+        unit_name = await bridge.get_property(PROPERTY_NAME)
+    except (ComfoConnectError, AioComfoConnectTimeout, AioComfoConnectNotConnected, AioComfoConnectNotReachable) as err:
+        await bridge.disconnect()
+        raise ConfigEntryNotReady("The bridge did not return its device information") from err
+    except BaseException:
+        # Cancellation or an unexpected read failure also releases the session.
+        await bridge.disconnect()
+        raise
 
-    # Get device information
-    bridge_info = await bridge.cmd_version_request()
-    unit_model = await bridge.get_property(PROPERTY_MODEL)
-    unit_firmware = await bridge.get_property(PROPERTY_FIRMWARE_VERSION)
-    unit_name = await bridge.get_property(PROPERTY_NAME)
+    hass.data[DOMAIN][entry.entry_id] = bridge
 
     device_registry = dr.async_get(hass)
 
