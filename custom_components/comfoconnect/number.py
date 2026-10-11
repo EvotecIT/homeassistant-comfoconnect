@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from asyncio import Lock
 from dataclasses import dataclass
 from time import monotonic
 
@@ -110,6 +111,7 @@ class ComfoConnectNumber(NumberEntity):
         """Initialize the ComfoConnect number."""
         self._ccb = ccb
         self._constraints_generation: int | None = None
+        self._write_lock = Lock()
         self._write_revision = 0
         self._write_readback_grace: tuple[set[float], int, float] | None = None
         self._attr_available = False
@@ -185,6 +187,11 @@ class ComfoConnectNumber(NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the configured property value."""
+        async with self._write_lock:
+            await self._async_write_value(value)
+
+    async def _async_write_value(self, value: float) -> None:
+        """Write and publish a value after earlier writes have finished."""
         if not self.available:
             raise HomeAssistantError("The number is unavailable until its value and constraints have been read")
 
