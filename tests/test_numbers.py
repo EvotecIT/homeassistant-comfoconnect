@@ -125,6 +125,80 @@ def test_successive_writes_keep_the_latest_value_during_stale_readback(tmp_path)
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("key", [item.key for item in NUMBER_TYPES if item.key in ("rmot_cooling", "temperature_profile_cool", "airflow_low")])
+def test_overlapping_writes_publish_the_last_requested_value(tmp_path, key):
+    """Out-of-order device acknowledgements cannot reverse two requested settings."""
+
+    async def scenario():
+        hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
+        bridge, entity = number_entity(hass)
+        description = next(item for item in NUMBER_TYPES if item.key == key)
+        entity.entity_description = description
+        scale = description.scale
+        bridge.get_single_property.return_value = 20 * scale
+        await entity.async_update()
+        first_started = asyncio.Event()
+        first_ack = asyncio.Event()
+        second_ack = asyncio.Event()
+
+        async def delayed_write(*args):
+            encoded_value = args[1] if key == "airflow_low" else args[3]
+            if encoded_value == 21 * scale:
+                first_started.set()
+                await first_ack.wait()
+            else:
+                await second_ack.wait()
+
+        bridge.set_property_typed.side_effect = delayed_write
+        bridge.set_flow_for_speed = AsyncMock(side_effect=delayed_write)
+        first = hass.loop.create_task(entity.async_set_native_value(21))
+        await asyncio.wait_for(first_started.wait(), timeout=5)
+        second = hass.loop.create_task(entity.async_set_native_value(22))
+        await asyncio.sleep(0)
+        second_ack.set()
+        await asyncio.sleep(0)
+        first_ack.set()
+        await asyncio.gather(first, second)
+        assert hass.states.get(entity.entity_id).state == "22.0"
+        bridge.get_single_property.return_value = 22 * scale
+        await entity.async_update()
+        assert entity.native_value == 22
+
+    asyncio.run(scenario())
+
+
+def test_queued_write_rechecks_session_constraints(tmp_path):
+    """A waiting write cannot use constraints invalidated by a new session."""
+
+    async def scenario():
+        hass = HomeAssistant(str(tmp_path))
+        setup_loader(hass)
+        bridge, entity = number_entity(hass)
+        await entity.async_update()
+        first_started = asyncio.Event()
+        first_ack = asyncio.Event()
+
+        async def delayed_write(*_args):
+            first_started.set()
+            await first_ack.wait()
+
+        bridge.set_property_typed.side_effect = delayed_write
+        first = hass.loop.create_task(entity.async_set_native_value(21))
+        await asyncio.wait_for(first_started.wait(), timeout=5)
+        second = hass.loop.create_task(entity.async_set_native_value(22))
+        await asyncio.sleep(0)
+        with patch("aiocomfoconnect.bridge.Bridge._send", new=AsyncMock()):
+            await bridge.cmd_start_session(True)
+        first_ack.set()
+        await first
+        with pytest.raises(HomeAssistantError):
+            await second
+        assert bridge.set_property_typed.await_count == 1
+
+    asyncio.run(scenario())
+
+
 def test_readback_grace_expires_instead_of_hiding_the_device_forever(tmp_path):
     """A device that retains its old value becomes authoritative after the grace."""
 
