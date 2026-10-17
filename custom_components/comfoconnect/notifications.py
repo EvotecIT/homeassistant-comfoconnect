@@ -6,7 +6,8 @@ from enum import StrEnum
 
 from aiocomfoconnect.const import ERRORS, ERRORS_140
 from homeassistant.components import persistent_notification
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 
 CONF_ALARM_NOTIFICATIONS = "alarm_notifications"
 DATA_NOTIFICATIONS = "comfoconnect_notifications"
@@ -35,11 +36,31 @@ class AlarmNotifications:
         self.mode = mode
         self._alarms: dict[int, dict[int, str]] = {}
         self._last_delivered: dict[int, dict[int, str]] | None = None
+        self._remove_options_listener: CALLBACK_TYPE | None = None
+        self._closed = False
+
+    @callback
+    def listen_to_options(self, entry: ConfigEntry) -> None:
+        """Listen for the entry's lifetime, including setup retries and unloads."""
+        self._remove_options_listener = entry.add_update_listener(self._async_update_options)
+
+    async def _async_update_options(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Apply persisted choices even while the bridge is not loaded."""
+        self.set_mode(entry.options[CONF_ALARM_NOTIFICATIONS])
+
+    @callback
+    def close(self) -> None:
+        """Release the entry listener and dismiss the notice when removed."""
+        self._closed = True
+        if self._remove_options_listener is not None:
+            self._remove_options_listener()
+            self._remove_options_listener = None
+        self.dismiss()
 
     @callback
     def set_mode(self, mode: str) -> None:
         """Apply an option to the current alarms without reconnecting the bridge."""
-        if self.mode == mode:
+        if self._closed or self.mode == mode:
             return
         self.mode = mode
         self._publish()
@@ -47,6 +68,8 @@ class AlarmNotifications:
     @callback
     def update(self, node_id: int, errors: dict[int, str]) -> None:
         """Accept confirmed node reports; a recheck cannot confirm removals."""
+        if self._closed:
+            return
         confirmed = {code: message for code, message in errors.items() if code != ALARM_RECHECK_ERROR_ID}
         if ALARM_RECHECK_ERROR_ID in errors:
             if not confirmed:
@@ -58,7 +81,7 @@ class AlarmNotifications:
 
     @callback
     def dismiss(self) -> None:
-        """Remove the unit's notification when its config entry is removed."""
+        """Dismiss the unit's native notification."""
         persistent_notification.async_dismiss(self.hass, self.notification_id)
 
     @callback

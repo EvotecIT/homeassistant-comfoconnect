@@ -1,5 +1,6 @@
 """Native notifications follow the chosen policy without changing raw alarms."""
 
+import asyncio
 from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -240,4 +241,56 @@ async def test_first_confirmed_clear_removes_an_old_notice(hass, notices):
     pn.async_create(hass, "Old alarm", notification_id=bridge.notifications.notification_id)
     bridge.alarm_callback(1, {})
     await hass.async_block_till_done()
+    assert not notices
+
+
+async def test_options_saved_while_connecting_apply_before_and_after_setup(hass, setup_bridge, notices):
+    """Saving Off during a slow setup also governs callbacks before setup finishes."""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    connecting_bridge = None
+
+    async def connect(bridge, local_uuid):
+        nonlocal connecting_bridge
+        connecting_bridge = bridge
+        entered.set()
+        await release.wait()
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=1,
+        minor_version=2,
+        data={CONF_HOST: "192.0.2.1", CONF_UUID: "connecting-bridge", CONF_LOCAL_UUID: "11" * 16},
+        options={CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.ALL},
+    )
+    entry.add_to_hass(hass)
+    with patch(f"{BRIDGE}.connect", new=connect):
+        setup_task = asyncio.create_task(hass.config_entries.async_setup(entry.entry_id))
+        try:
+            await entered.wait()
+            result = await hass.config_entries.options.async_init(entry.entry_id)
+            await hass.config_entries.options.async_configure(result["flow_id"], {CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.OFF})
+            await asyncio.sleep(0)
+            connecting_bridge.alarm_callback(1, {21: ERRORS[21]})
+            await asyncio.sleep(0)
+            assert not notices
+        finally:
+            release.set()
+            assert await setup_task
+    connecting_bridge.alarm_callback(1, {22: ERRORS[22]})
+    await hass.async_block_till_done()
+    assert not notices
+
+
+async def test_options_apply_to_retained_notices_while_unloaded(hass, setup_bridge, notices):
+    """An offline/unloaded entry still applies delivery choices to its known alarms."""
+    entry, bridge = await setup_bridge()
+    bridge.alarm_callback(1, {79: ERRORS[79]})
+    await hass.async_block_till_done()
+    assert notices
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(result["flow_id"], {CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.OFF})
+    await hass.async_block_till_done()
+    assert entry.options[CONF_ALARM_NOTIFICATIONS] == AlarmNotificationMode.OFF
     assert not notices

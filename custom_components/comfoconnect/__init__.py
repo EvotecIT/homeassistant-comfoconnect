@@ -82,7 +82,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     # Native notifications and their per-node/dismissal state survive integration
     # reloads, just as HA's notification store does. A Core restart starts fresh.
-    notifications = hass.data.setdefault(DATA_NOTIFICATIONS, {}).setdefault(entry.entry_id, AlarmNotifications(hass, entry.data[CONF_UUID]))
+    controllers = hass.data.setdefault(DATA_NOTIFICATIONS, {})
+    if (notifications := controllers.get(entry.entry_id)) is None:
+        notifications = controllers[entry.entry_id] = AlarmNotifications(hass, entry.data[CONF_UUID])
+        notifications.listen_to_options(entry)
     notifications.set_mode(entry.options.get(CONF_ALARM_NOTIFICATIONS, AlarmNotificationMode.ALL))
 
     try:
@@ -186,14 +189,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await bridge.async_close()
 
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, disconnect_bridge))
-    entry.async_on_unload(entry.add_update_listener(async_update_options))
 
     return True
-
-
-async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Apply notification choices without discarding the active bridge session."""
-    hass.data[DATA_NOTIFICATIONS][entry.entry_id].set_mode(entry.options[CONF_ALARM_NOTIFICATIONS])
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -212,7 +209,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove only this entry's retained notification state and notice."""
     if notifications := hass.data.get(DATA_NOTIFICATIONS, {}).pop(entry.entry_id, None):
-        notifications.dismiss()
+        notifications.close()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
