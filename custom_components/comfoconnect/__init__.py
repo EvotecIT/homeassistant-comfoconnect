@@ -155,6 +155,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         sw_version=version_decode(unit_firmware),
     )
     device_registry.async_update_device(unit_device.id, via_device_id=bridge_device.id)
+    bridge.device_id = unit_device.id
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -206,6 +207,7 @@ class ComfoConnectBridge(ComfoConnect):
         self.hass = hass
         # Latest alarms per node; a node is missing until it has reported.
         self.active_alarms: dict[int, dict[int, str]] = {}
+        self.device_id: str | None = None
         self.is_available = True
         self._keepalive_lock = asyncio.Lock()
         self._closing = False
@@ -289,13 +291,15 @@ class ComfoConnectBridge(ComfoConnect):
     @callback
     def alarm_callback(self, node_id: int, errors: dict[int, str]) -> None:
         """Handle alarm updates."""
-        if self.active_alarms.get(node_id) == errors:
+        previous = self.active_alarms.get(node_id)
+        if previous == errors:
             return
 
         self.active_alarms[node_id] = dict(errors)
         errors = self.active_alarms[node_id]
 
         event_data = {
+            "device_id": self.device_id,
             "bridge_uuid": self.uuid,
             "node_id": node_id,
             "errors": [{"id": error_id, "message": error} for error_id, error in errors.items()],
@@ -305,7 +309,8 @@ class ComfoConnectBridge(ComfoConnect):
             self.hass,
             SIGNAL_COMFOCONNECT_ALARM_RECEIVED.format(self.uuid),
         )
-        self.hass.bus.async_fire(EVENT_COMFOCONNECT_ALARM, event_data)
+        if previous is not None or errors:
+            self.hass.bus.async_fire(EVENT_COMFOCONNECT_ALARM, event_data)
 
         notification_id = PERSISTENT_NOTIFICATION_ID.format(self.uuid)
         if not any(self.active_alarms.values()):
