@@ -79,6 +79,8 @@ def test_keepalive_callback_starts_reauth_for_persistent_refusal():
         entry = SimpleNamespace(
             entry_id="entry",
             state=ConfigEntryState.LOADED,
+            options={},
+            add_update_listener=Mock(),
             data={"host": "127.0.0.1", CONF_UUID: "bridge", CONF_LOCAL_UUID: "local"},
             async_on_unload=Mock(),
             async_start_reauth=Mock(),

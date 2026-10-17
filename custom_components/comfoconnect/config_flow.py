@@ -12,11 +12,14 @@ from aiocomfoconnect.exceptions import ComfoConnectNotAllowed
 from homeassistant import config_entries
 from homeassistant.components import network
 from homeassistant.const import CONF_HOST, CONF_PIN
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import selector
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.util.uuid import random_uuid_hex
 
 from .const import CONF_LOCAL_UUID, CONF_UUID, DOMAIN
+from .notifications import CONF_ALARM_NOTIFICATIONS, AlarmNotificationMode
 
 DEFAULT_PIN = "0000"
 COMFOCONNECT_MANUAL_BRIDGE_ID = "manual"
@@ -27,6 +30,13 @@ class ComfoConnectConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a ComfoConnect config flow."""
 
     VERSION = 1
+    MINOR_VERSION = 2
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> ComfoConnectOptionsFlow:
+        """Offer native notification options for an existing bridge."""
+        return ComfoConnectOptionsFlow()
 
     def __init__(self) -> None:
         """Initialize the Hue flow."""
@@ -150,6 +160,7 @@ class ComfoConnectConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_UUID: self.bridge.uuid,
                 CONF_LOCAL_UUID: self.local_uuid,
             },
+            options={CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.OFF},
         )
 
     async def async_step_enter_pin(
@@ -169,6 +180,32 @@ class ComfoConnectConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_PIN): vol.All(
                         vol.Coerce(int),
                         vol.Range(min=0, max=9999, msg="A PIN must be between 0000 and 9999"),
+                    )
+                }
+            ),
+        )
+
+
+class ComfoConnectOptionsFlow(config_entries.OptionsFlow):
+    """Configure native notification delivery independently of alarm events."""
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Choose which alarms should create a Home Assistant notification."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data={**self.config_entry.options, **user_input})
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_ALARM_NOTIFICATIONS,
+                        default=self.config_entry.options.get(CONF_ALARM_NOTIFICATIONS, AlarmNotificationMode.ALL),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[mode.value for mode in AlarmNotificationMode],
+                            translation_key=CONF_ALARM_NOTIFICATIONS,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
                     )
                 }
             ),

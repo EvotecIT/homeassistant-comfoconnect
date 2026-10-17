@@ -52,6 +52,20 @@ The Warm, Normal, and Cool profile target temperatures configure the unit's fixe
 
 Changing an airflow target overwrites the installer's commissioned airflow setting for that speed. Record the existing values and consult your installer before changing them, since these settings affect the ventilation balance.
 
+### Native alarm notifications
+
+Open **Settings → Devices & services → Zehnder ComfoAir Q → Configure** and choose **Native notifications**:
+
+* **Off**: no built-in notifications. Alarm sensors and events still work.
+* **Faults only**: notify about alarms other than filter maintenance reminders.
+* **Faults and maintenance**: include filter ordering, cleaning, and replacement reminders. Maintenance appears in its own section and has a maintenance title when no faults are active.
+
+Existing installations keep **Faults and maintenance** when upgrading. New installations default to **Off**. Changing the option applies immediately without reconnecting the bridge.
+
+Each ventilation unit has one persistent notification combining its nodes. Repeated reports do not recreate a dismissed notice; a change to the selected alarms can notify again. Dismissal and known node alarms survive an integration reload. A Home Assistant restart starts a fresh alarm session. An alarm recheck does not create a notification or confirm that an earlier alarm has cleared; a confirmed clear removes it once no selected alarms remain.
+
+Blueprints and automations are optional for phone notifications, quiet hours, or escalation. They can use the Active alarms sensor or the event below, independently of the native notification option. Choose **Off** if an automation already handles Home Assistant notifications and you want to avoid duplicate delivery.
+
 ### Alarm events
 
 The `comfoconnect_alarm` event reports changed alarms and clears per node. Its payload contains `device_id` (the ventilation unit), `bridge_uuid`, `node_id`, and an `errors` list with `id` and `message` fields. A clear has an empty list. Repeated identical reports and startup reports without alarms do not fire an event. Alarms received before device registration have a null `device_id`.
