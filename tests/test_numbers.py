@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from aiocomfoconnect.exceptions import AioComfoConnectNotConnected, AioComfoConnectTimeout, ComfoConnectRmiError
+from aiocomfoconnect.exceptions import AioComfoConnectNotConnected, AioComfoConnectTimeout, ComfoConnectNotReachable, ComfoConnectRmiError
 from custom_components.comfoconnect import ComfoConnectBridge
 from custom_components.comfoconnect.number import NUMBER_TYPES, ComfoConnectNumber
 from homeassistant.core import HomeAssistant
@@ -29,6 +29,29 @@ def number_entity(hass):
     entity.hass = hass
     entity.entity_id = "number.cooling_threshold"
     return bridge, entity
+
+
+@pytest.mark.parametrize("first_read", [True, False])
+async def test_gateway_routing_failure_is_unavailable_and_recovers(hass: HomeAssistant, first_read):
+    """A reachable gateway cannot make an unreachable unit's numeric settings writable."""
+    bridge, entity = number_entity(hass)
+    if not first_read:
+        await entity.async_update()
+        await entity.async_set_native_value(21)
+
+    bridge.get_single_property.side_effect = ComfoConnectNotReachable("Unit cannot be reached")
+    await entity.async_update()
+    assert not entity.available
+    with pytest.raises(HomeAssistantError):
+        await entity.async_set_native_value(22)
+
+    bridge.get_single_property.side_effect = None
+    bridge.get_single_property.return_value = 200
+    bridge.cmd_rmi_request.side_effect = [metadata(150, 450), metadata(20)]
+    await entity.async_update()
+    assert entity.available
+    assert entity.native_value == 20
+    assert (entity.native_min_value, entity.native_max_value, entity.native_step) == (15, 45, 2)
 
 
 @pytest.mark.parametrize("error", [ComfoConnectRmiError("Busy"), AioComfoConnectTimeout("Timed out")])
