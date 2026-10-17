@@ -22,7 +22,7 @@ from aiocomfoconnect.properties import (
 )
 from aiocomfoconnect.sensors import Sensor
 from aiocomfoconnect.util import version_decode
-from homeassistant.components import network, persistent_notification
+from homeassistant.components import network
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_HOST, EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant, callback
@@ -37,6 +37,12 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
 
 from .const import CONF_LOCAL_UUID, CONF_UUID, DOMAIN
+from .notifications import (
+    CONF_ALARM_NOTIFICATIONS,
+    DATA_NOTIFICATIONS,
+    AlarmNotificationMode,
+    AlarmNotifications,
+)
 
 PLATFORMS: list[Platform] = [
     Platform.FAN,
@@ -53,8 +59,6 @@ SIGNAL_COMFOCONNECT_UPDATE_RECEIVED = "comfoconnect_update_{}_{}"
 SIGNAL_COMFOCONNECT_ALARM_RECEIVED = "comfoconnect_alarm_{}"
 SIGNAL_COMFOCONNECT_AVAILABILITY = "comfoconnect_availability_{}"
 EVENT_COMFOCONNECT_ALARM = "comfoconnect_alarm"
-PERSISTENT_NOTIFICATION_ID = "comfoconnect_alarm_{}"
-ALARM_RECHECK_ERROR_ID = 100
 
 KEEP_ALIVE_INTERVAL = timedelta(seconds=30)
 
@@ -76,9 +80,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Zehnder ComfoConnect from a config entry."""
 
     hass.data.setdefault(DOMAIN, {})
+    # Native notifications and their per-node/dismissal state survive integration
+    # reloads, just as HA's notification store does. A Core restart starts fresh.
+    notifications = hass.data.setdefault(DATA_NOTIFICATIONS, {}).setdefault(entry.entry_id, AlarmNotifications(hass, entry.data[CONF_UUID]))
+    notifications.set_mode(entry.options.get(CONF_ALARM_NOTIFICATIONS, AlarmNotificationMode.ALL))
 
     try:
-        bridge = ComfoConnectBridge(hass, entry.data[CONF_HOST], entry.data[CONF_UUID])
+        bridge = ComfoConnectBridge(hass, entry.data[CONF_HOST], entry.data[CONF_UUID], notifications)
         await bridge.connect(entry.data[CONF_LOCAL_UUID])
 
     except ComfoConnectNotAllowed:
@@ -102,7 +110,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise ConfigEntryNotReady from err
 
         # Try again, with the updated host this time
-        bridge = ComfoConnectBridge(hass, discovered_bridge.host, entry.data[CONF_UUID])
+        bridge = ComfoConnectBridge(hass, discovered_bridge.host, entry.data[CONF_UUID], notifications)
         try:
             await bridge.connect(entry.data[CONF_LOCAL_UUID])
 
@@ -178,8 +186,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await bridge.async_close()
 
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, disconnect_bridge))
+    entry.async_on_unload(entry.add_update_listener(async_update_options))
 
     return True
+
+
+async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Apply notification choices without discarding the active bridge session."""
+    hass.data[DATA_NOTIFICATIONS][entry.entry_id].set_mode(entry.options[CONF_ALARM_NOTIFICATIONS])
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Preserve native notifications for installations configured before options."""
+    if entry.version > 1:
+        return False
+    if entry.minor_version < 2:
+        hass.config_entries.async_update_entry(
+            entry,
+            options={CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.ALL, **entry.options},
+            minor_version=2,
+        )
+    return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove only this entry's retained notification state and notice."""
+    if notifications := hass.data.get(DATA_NOTIFICATIONS, {}).pop(entry.entry_id, None):
+        notifications.dismiss()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -195,7 +228,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 class ComfoConnectBridge(ComfoConnect):
     """Representation of a ComfoConnect bridge."""
 
-    def __init__(self, hass: HomeAssistant, host: str, uuid: str):
+    def __init__(self, hass: HomeAssistant, host: str, uuid: str, notifications: AlarmNotifications | None = None):
         """Initialize the ComfoConnect bridge."""
         super().__init__(
             host,
@@ -205,6 +238,7 @@ class ComfoConnectBridge(ComfoConnect):
             self.alarm_callback,
         )
         self.hass = hass
+        self.notifications = notifications or AlarmNotifications(hass, uuid)
         # Latest alarms per node; a node is missing until it has reported.
         self.active_alarms: dict[int, dict[int, str]] = {}
         self.device_id: str | None = None
@@ -312,30 +346,4 @@ class ComfoConnectBridge(ComfoConnect):
         if previous is not None or errors:
             self.hass.bus.async_fire(EVENT_COMFOCONNECT_ALARM, event_data)
 
-        notification_id = PERSISTENT_NOTIFICATION_ID.format(self.uuid)
-        if not any(self.active_alarms.values()):
-            _LOGGER.info("Alarms cleared for Node %s", node_id)
-            persistent_notification.async_dismiss(self.hass, notification_id)
-            return
-
-        title, message = self._format_alarm_notification(self.active_alarms)
-
-        _LOGGER.info(message)
-        persistent_notification.async_create(
-            self.hass,
-            message,
-            title=title,
-            notification_id=notification_id,
-        )
-
-    @staticmethod
-    def _format_alarm_notification(alarms: dict[int, dict[int, str]]) -> tuple[str, str]:
-        """Format all active node alarms for the bridge's notification."""
-        is_recheck = {error_id for errors in alarms.values() for error_id in errors} == {ALARM_RECHECK_ERROR_ID}
-        title = "ComfoConnect is checking alarms" if is_recheck else "ComfoConnect needs attention"
-        intro = "The ventilation unit is checking whether alarms are still active." if is_recheck else "The ventilation unit reported active alarms."
-        lines = [intro]
-        for node_id, errors in sorted(alarms.items()):
-            if errors:
-                lines.extend(["", f"Node: {node_id}", "", *[f"- **{error_id}**: {error}" for error_id, error in errors.items()]])
-        return title, "\n".join(lines)
+        self.notifications.update(node_id, errors)

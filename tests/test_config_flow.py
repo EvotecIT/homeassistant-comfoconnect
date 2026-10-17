@@ -2,10 +2,13 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from custom_components.comfoconnect.config_flow import ComfoConnectConfigFlow
+from custom_components.comfoconnect.const import CONF_LOCAL_UUID, CONF_UUID, DOMAIN
+from custom_components.comfoconnect.notifications import CONF_ALARM_NOTIFICATIONS, AlarmNotificationMode
+from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 
 
@@ -33,3 +36,22 @@ def test_registration_name_fits_bridge_buffer(tmp_path, location_name):
         flow.async_create_entry.assert_called_once()
 
     asyncio.run(scenario())
+
+
+async def test_new_installations_default_to_notifications_off(hass, enable_custom_integrations):
+    """The actual manual registration flow stores Off, distinct from migrated entries."""
+    bridge = SimpleNamespace(host="192.0.2.1", uuid="test-bridge", register=AsyncMock(), disconnect=AsyncMock())
+    with (
+        patch("custom_components.comfoconnect.config_flow.aiocomfoconnect.discover_bridges", return_value=[bridge]),
+        patch("homeassistant.config_entries.ConfigEntries.async_setup", return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_UUID: "manual"})
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_HOST: bridge.host})
+        await hass.async_block_till_done()
+    assert result["type"] == "create_entry"
+    entry = result["result"]
+    assert entry.options == {CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.OFF}
+    assert entry.minor_version == 2
+    assert entry.data[CONF_LOCAL_UUID]
+    bridge.register.assert_awaited_once()

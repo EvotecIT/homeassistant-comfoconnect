@@ -17,7 +17,7 @@ def test_failed_device_read_closes_session_and_requests_retry(error):
 
     async def scenario():
         hass = SimpleNamespace(loop=asyncio.get_running_loop(), data={})
-        entry = SimpleNamespace(entry_id="entry", data={"host": "127.0.0.1", CONF_UUID: "bridge", CONF_LOCAL_UUID: "local"})
+        entry = SimpleNamespace(entry_id="entry", data={"host": "127.0.0.1", CONF_UUID: "bridge", CONF_LOCAL_UUID: "local"}, options={})
         bridge = SimpleNamespace(
             connect=AsyncMock(), disconnect=AsyncMock(), cmd_version_request=AsyncMock(return_value=Mock()), get_property=AsyncMock(side_effect=error)
         )
@@ -35,7 +35,7 @@ def test_cancelled_setup_read_closes_session_and_propagates_cancellation():
 
     async def scenario():
         hass = SimpleNamespace(loop=asyncio.get_running_loop(), data={})
-        entry = SimpleNamespace(entry_id="entry", data={"host": "127.0.0.1", CONF_UUID: "bridge", CONF_LOCAL_UUID: "local"})
+        entry = SimpleNamespace(entry_id="entry", data={"host": "127.0.0.1", CONF_UUID: "bridge", CONF_LOCAL_UUID: "local"}, options={})
         bridge = SimpleNamespace(connect=AsyncMock(), disconnect=AsyncMock(), cmd_version_request=AsyncMock(side_effect=asyncio.CancelledError()))
         with patch("custom_components.comfoconnect.ComfoConnectBridge", return_value=bridge), pytest.raises(asyncio.CancelledError):
             await async_setup_entry(hass, entry)
