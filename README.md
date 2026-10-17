@@ -19,6 +19,7 @@ integration in Home Assistant.
 * Show yearly energy totals and avoided heating/cooling measurements
 * Show an Active alarms diagnostic binary sensor
 * Configure passive-temperature and humidity ventilation controls
+* Control timed away mode
 * Show various sensors
 * Show extended diagnostic and energy sensors
 
@@ -51,6 +52,12 @@ Number entities are disabled by default and use the unit's own minimum, maximum,
 The Warm, Normal, and Cool profile target temperatures configure the unit's fixed presets. They apply when temperature regulation is set to `FIXED` on the unit's display. In `ADAPTIVE` mode the unit calculates its target from the running mean outdoor temperature (RMOT), so changing a stored fixed preset does not set the current target. The Temperature Profile select chooses Warm, Normal, or Cool independently of that regulation mode.
 
 Changing an airflow target overwrites the installer's commissioned airflow setting for that speed. Record the existing values and consult your installer before changing them, since these settings affect the ventilation balance.
+
+### Away mode
+
+Choose a duration in Away Mode to start a timer. Choose `Off`, or use Cancel away, to stop it. `Active` reports a running timer; selecting it does not start or extend a timer.
+
+Away Mode offers durations in minutes, 2/8/24 hours, and 7/14 days. Cancel the timer when you return early.
 
 ## Installation
 

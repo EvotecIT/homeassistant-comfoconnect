@@ -229,6 +229,8 @@ class ComfoConnectBridge(ComfoConnect):
         if self._closing or self._keepalive_lock.locked():
             return
         async with self._keepalive_lock:
+            if self._closing:
+                return
             await self._async_keepalive(local_uuid)
 
     async def _async_keepalive(self, local_uuid: str) -> None:
