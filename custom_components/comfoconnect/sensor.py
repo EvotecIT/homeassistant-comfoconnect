@@ -93,6 +93,7 @@ from . import (
     SIGNAL_COMFOCONNECT_UPDATE_RECEIVED,
     ComfoConnectBridge,
 )
+from .const import SENSOR_POSTHEATER_STATE, SENSOR_POSTHEATER_TEMP_BEFORE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -544,7 +545,7 @@ SENSOR_TYPES = (
         key=SENSOR_HUMIDITY_AFTER_PREHEATER,
         device_class=SensorDeviceClass.HUMIDITY,
         state_class=SensorStateClass.MEASUREMENT,
-        name="Outdoor humidity after preheater",
+        name="Outside humidity after preheater",
         native_unit_of_measurement=PERCENTAGE,
         ccb_sensor=SENSORS.get(SENSOR_HUMIDITY_AFTER_PREHEATER),
         entity_registry_enabled_default=False,
@@ -643,6 +644,26 @@ SENSOR_TYPES = (
         name="ComfoCool condensor temperature",
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         ccb_sensor=SENSORS.get(SENSOR_COMFOCOOL_CONDENSOR_TEMP),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_POSTHEATER_STATE,
+        state_class=SensorStateClass.MEASUREMENT,
+        name="Postheater state",
+        native_unit_of_measurement=PERCENTAGE,
+        icon="mdi:radiator",
+        ccb_sensor=SENSORS.get(SENSOR_POSTHEATER_STATE),
+        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ComfoconnectSensorEntityDescription(
+        key=SENSOR_POSTHEATER_TEMP_BEFORE,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        name="Temperature before postheater",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        ccb_sensor=SENSORS.get(SENSOR_POSTHEATER_TEMP_BEFORE),
         entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),

@@ -52,6 +52,10 @@ The Warm, Normal, and Cool profile target temperatures configure the unit's fixe
 
 Changing an airflow target overwrites the installer's commissioned airflow setting for that speed. Record the existing values and consult your installer before changing them, since these settings affect the ventilation balance.
 
+### Alarm events
+
+The `comfoconnect_alarm` event reports changed alarms and clears per node. Its payload contains `device_id` (the ventilation unit), `bridge_uuid`, `node_id`, and an `errors` list with `id` and `message` fields. A clear has an empty list. Repeated identical reports and startup reports without alarms do not fire an event. Alarms received before device registration have a null `device_id`.
+
 ## Installation
 
 ### HACS

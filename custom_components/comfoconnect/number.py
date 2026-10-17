@@ -17,6 +17,7 @@ from aiocomfoconnect.exceptions import (
     AioComfoConnectNotConnected,
     AioComfoConnectNotReachable,
     AioComfoConnectTimeout,
+    ComfoConnectError,
     ComfoConnectRmiError,
 )
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberEntityDescription, NumberMode
@@ -251,7 +252,10 @@ class ComfoConnectNumber(NumberEntity):
                 await self._update_constraints()
             if generation != self._ccb.connection_generation:
                 raise ValueError("Bridge session changed while reading the number")
-        except (ComfoConnectRmiError, AioComfoConnectTimeout, AioComfoConnectNotConnected, AioComfoConnectNotReachable, ValueError) as err:
+        except (ComfoConnectError, AioComfoConnectTimeout, AioComfoConnectNotConnected, AioComfoConnectNotReachable, ValueError) as err:
+            if isinstance(err, ComfoConnectError) and not isinstance(err, ComfoConnectRmiError):
+                self._constraints_generation = None
+                self._write_readback_grace = None
             self._attr_available = self._ccb.is_available and self._constraints_generation == self._ccb.connection_generation
             _LOGGER.warning("Could not update %s; keeping the last value: %s", self.entity_description.name, err)
             return
