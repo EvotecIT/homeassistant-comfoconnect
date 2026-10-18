@@ -30,7 +30,6 @@ class ComfoConnectConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a ComfoConnect config flow."""
 
     VERSION = 1
-    MINOR_VERSION = 2
 
     @staticmethod
     @callback
@@ -199,7 +198,7 @@ class ComfoConnectOptionsFlow(config_entries.OptionsFlow):
                 {
                     vol.Required(
                         CONF_ALARM_NOTIFICATIONS,
-                        default=self.config_entry.options.get(CONF_ALARM_NOTIFICATIONS, AlarmNotificationMode.ALL),
+                        default=self.config_entry.options.get(CONF_ALARM_NOTIFICATIONS, AlarmNotificationMode.OFF),
                     ): selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=[mode.value for mode in AlarmNotificationMode],

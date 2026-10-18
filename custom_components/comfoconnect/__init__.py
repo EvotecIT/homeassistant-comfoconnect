@@ -86,7 +86,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if (notifications := controllers.get(entry.entry_id)) is None:
         notifications = controllers[entry.entry_id] = AlarmNotifications(hass, entry.data[CONF_UUID])
         notifications.listen_to_options(entry)
-    notifications.set_mode(entry.options.get(CONF_ALARM_NOTIFICATIONS, AlarmNotificationMode.ALL))
+    notifications.set_mode(entry.options.get(CONF_ALARM_NOTIFICATIONS, AlarmNotificationMode.OFF))
 
     try:
         bridge = ComfoConnectBridge(hass, entry.data[CONF_HOST], entry.data[CONF_UUID], notifications)
@@ -190,19 +190,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, disconnect_bridge))
 
-    return True
-
-
-async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Preserve native notifications for installations configured before options."""
-    if entry.version > 1:
-        return False
-    if entry.minor_version < 2:
-        hass.config_entries.async_update_entry(
-            entry,
-            options={CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.ALL, **entry.options},
-            minor_version=2,
-        )
     return True
 
 

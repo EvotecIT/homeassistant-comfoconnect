@@ -68,14 +68,14 @@ def test_refused_session_is_closed_and_recovery_controls_availability(tmp_path, 
     asyncio.run(scenario())
 
 
-def test_keepalive_callback_starts_reauth_for_persistent_refusal():
+def test_keepalive_callback_starts_reauth_for_persistent_refusal(tmp_path):
     """A rejected replacement session asks HA to reauthenticate the existing entry."""
 
     async def scenario():
         callbacks = []
-        hass = SimpleNamespace(
-            loop=asyncio.get_running_loop(), data={}, config_entries=SimpleNamespace(async_forward_entry_setups=AsyncMock()), bus=Mock()
-        )
+        hass = HomeAssistant(str(tmp_path))
+        hass.config_entries = SimpleNamespace(async_forward_entry_setups=AsyncMock())
+        hass.bus = Mock()
         entry = SimpleNamespace(
             entry_id="entry",
             state=ConfigEntryState.LOADED,

@@ -1,6 +1,7 @@
 """Native notifications follow the chosen policy without changing raw alarms."""
 
 import asyncio
+import logging
 from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -55,12 +56,12 @@ async def setup_bridge(hass):
         stack.enter_context(patch("homeassistant.config_entries.ConfigEntries.async_forward_entry_setups", new_callable=AsyncMock))
         stack.enter_context(patch("homeassistant.config_entries.ConfigEntries.async_unload_platforms", new_callable=AsyncMock, return_value=True))
 
-        async def setup(options=None, minor_version=1, uuid="test-bridge"):
+        async def setup(options=None, uuid="test-bridge"):
             entry = MockConfigEntry(
                 domain=DOMAIN,
                 title=uuid,
                 version=1,
-                minor_version=minor_version,
+                minor_version=1,
                 data={CONF_HOST: "192.0.2.1", CONF_UUID: uuid, CONF_LOCAL_UUID: "11" * 16},
                 options=options or {},
             )
@@ -71,11 +72,24 @@ async def setup_bridge(hass):
         yield setup
 
 
-async def test_existing_entries_keep_native_faults_and_maintenance(hass, setup_bridge, notices):
-    """Migration keeps notification delivery on and does not lose other settings."""
+async def test_existing_entries_default_to_off(hass, setup_bridge, notices, caplog):
+    """An existing entry without a notification choice stays silent and keeps its options."""
     entry, bridge = await setup_bridge(options={"other_setting": "kept"})
-    assert entry.minor_version == 2
-    assert entry.options == {CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.ALL, "other_setting": "kept"}
+    assert entry.minor_version == 1
+    assert entry.options == {"other_setting": "kept"}
+    bridge.alarm_callback(1, {79: ERRORS[79]})
+    bridge.alarm_callback(2, {21: ERRORS[21]})
+    # Discovery can update only the host, without adding a notification option.
+    hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_HOST: "192.0.2.2"})
+    await hass.async_block_till_done()
+    assert not notices
+    assert bridge.active_alarms == {1: {79: ERRORS[79]}, 2: {21: ERRORS[21]}}
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+async def test_maintenance_is_separate_when_enabled(hass, setup_bridge, notices):
+    """The opt-in all mode separates filter reminders from active faults."""
+    _, bridge = await setup_bridge(options={CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.ALL})
     bridge.alarm_callback(1, {79: ERRORS[79]})
     await hass.async_block_till_done()
     notice = notices[bridge.notifications.notification_id]
@@ -90,11 +104,11 @@ async def test_existing_entries_keep_native_faults_and_maintenance(hass, setup_b
 
 
 @pytest.mark.parametrize("mode", list(AlarmNotificationMode))
-async def test_migration_preserves_an_explicit_choice(hass, setup_bridge, mode):
-    """An existing option is never reset by migration or another setup."""
+async def test_existing_entries_keep_an_explicit_choice(hass, setup_bridge, mode):
+    """Setup retains a notification choice the user has actually saved."""
     entry, _ = await setup_bridge(options={CONF_ALARM_NOTIFICATIONS: mode})
     assert entry.options[CONF_ALARM_NOTIFICATIONS] == mode
-    assert entry.minor_version == 2
+    assert entry.minor_version == 1
 
 
 @pytest.mark.parametrize("mode", list(AlarmNotificationMode))
@@ -105,7 +119,7 @@ async def test_options_apply_without_reconnecting(hass, setup_bridge, notices, m
     await hass.async_block_till_done()
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] == "form"
-    assert result["data_schema"]({}) == {CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.ALL}
+    assert result["data_schema"]({}) == {CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.OFF}
     result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_ALARM_NOTIFICATIONS: mode})
     await hass.async_block_till_done()
     assert result["type"] == "create_entry"
@@ -139,7 +153,7 @@ async def test_faults_only_uses_firmware_specific_definitions(hass, setup_bridge
 
 async def test_rechecks_wait_for_confirmed_clear_across_nodes(hass, setup_bridge, notices):
     """Recheck is silent, preserves known faults, and never clears another node."""
-    _, bridge = await setup_bridge()
+    _, bridge = await setup_bridge(options={CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.ALL})
     bridge.alarm_callback(1, {100: ERRORS[100]})
     await hass.async_block_till_done()
     assert not notices
@@ -191,8 +205,8 @@ async def test_dismissal_survives_duplicate_filtered_reports_and_reload(hass, se
 
 async def test_reload_and_removal_preserve_other_nodes_and_bridges(hass, setup_bridge, notices):
     """A first clear after reload and another entry's removal cannot clear an active unit."""
-    entry, bridge = await setup_bridge()
-    _, other = await setup_bridge(uuid="other-bridge")
+    entry, bridge = await setup_bridge(options={CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.ALL})
+    _, other = await setup_bridge(options={CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.ALL}, uuid="other-bridge")
     bridge.alarm_callback(1, {21: ERRORS[21]})
     other.alarm_callback(1, {22: ERRORS[22]})
     await hass.async_block_till_done()
@@ -229,7 +243,7 @@ async def test_off_is_applied_before_connecting(hass, setup_bridge, notices):
         bridge.alarm_callback(1, {21: ERRORS[21]})
 
     with patch(f"{BRIDGE}.connect", new=connect):
-        _, bridge = await setup_bridge(options={CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.OFF}, minor_version=2)
+        _, bridge = await setup_bridge()
     await hass.async_block_till_done()
     assert bridge.active_alarms == {1: {21: ERRORS[21]}}
     assert not notices
@@ -259,7 +273,7 @@ async def test_options_saved_while_connecting_apply_before_and_after_setup(hass,
     entry = MockConfigEntry(
         domain=DOMAIN,
         version=1,
-        minor_version=2,
+        minor_version=1,
         data={CONF_HOST: "192.0.2.1", CONF_UUID: "connecting-bridge", CONF_LOCAL_UUID: "11" * 16},
         options={CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.ALL},
     )
@@ -284,7 +298,7 @@ async def test_options_saved_while_connecting_apply_before_and_after_setup(hass,
 
 async def test_options_apply_to_retained_notices_while_unloaded(hass, setup_bridge, notices):
     """An offline/unloaded entry still applies delivery choices to its known alarms."""
-    entry, bridge = await setup_bridge()
+    entry, bridge = await setup_bridge(options={CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.ALL})
     bridge.alarm_callback(1, {79: ERRORS[79]})
     await hass.async_block_till_done()
     assert notices
@@ -293,4 +307,13 @@ async def test_options_apply_to_retained_notices_while_unloaded(hass, setup_brid
     await hass.config_entries.options.async_configure(result["flow_id"], {CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.OFF})
     await hass.async_block_till_done()
     assert entry.options[CONF_ALARM_NOTIFICATIONS] == AlarmNotificationMode.OFF
+    assert not notices
+
+
+async def test_off_dismisses_an_old_notice_before_the_first_report(hass, setup_bridge, notices):
+    """The Off choice removes an existing own notice even if the device reports nothing yet."""
+    pn.async_create(hass, "Old alarm", notification_id="comfoconnect_alarm_test-bridge")
+    _, bridge = await setup_bridge()
+    await hass.async_block_till_done()
+    assert bridge.active_alarms == {}
     assert not notices

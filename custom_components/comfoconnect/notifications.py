@@ -29,7 +29,7 @@ class AlarmNotificationMode(StrEnum):
 class AlarmNotifications:
     """Keep one combined notification, including dismissal state across reloads."""
 
-    def __init__(self, hass: HomeAssistant, uuid: str, mode: str = AlarmNotificationMode.ALL) -> None:
+    def __init__(self, hass: HomeAssistant, uuid: str, mode: str = AlarmNotificationMode.OFF) -> None:
         """Initialize the delivery policy for one ventilation unit."""
         self.hass = hass
         self.notification_id = f"comfoconnect_alarm_{uuid}"
@@ -46,7 +46,7 @@ class AlarmNotifications:
 
     async def _async_update_options(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Apply persisted choices even while the bridge is not loaded."""
-        self.set_mode(entry.options[CONF_ALARM_NOTIFICATIONS])
+        self.set_mode(entry.options.get(CONF_ALARM_NOTIFICATIONS, AlarmNotificationMode.OFF))
 
     @callback
     def close(self) -> None:
@@ -60,7 +60,11 @@ class AlarmNotifications:
     @callback
     def set_mode(self, mode: str) -> None:
         """Apply an option to the current alarms without reconnecting the bridge."""
-        if self._closed or self.mode == mode:
+        if self._closed:
+            return
+        if self.mode == mode:
+            if mode == AlarmNotificationMode.OFF:
+                self.dismiss()
             return
         self.mode = mode
         self._publish()

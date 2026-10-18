@@ -39,7 +39,7 @@ def test_registration_name_fits_bridge_buffer(tmp_path, location_name):
 
 
 async def test_new_installations_default_to_notifications_off(hass, enable_custom_integrations):
-    """The actual manual registration flow stores Off, distinct from migrated entries."""
+    """The actual manual registration flow stores the same Off default as existing entries."""
     bridge = SimpleNamespace(host="192.0.2.1", uuid="test-bridge", register=AsyncMock(), disconnect=AsyncMock())
     with (
         patch("custom_components.comfoconnect.config_flow.aiocomfoconnect.discover_bridges", return_value=[bridge]),
@@ -52,6 +52,6 @@ async def test_new_installations_default_to_notifications_off(hass, enable_custo
     assert result["type"] == "create_entry"
     entry = result["result"]
     assert entry.options == {CONF_ALARM_NOTIFICATIONS: AlarmNotificationMode.OFF}
-    assert entry.minor_version == 2
+    assert entry.minor_version == 1
     assert entry.data[CONF_LOCAL_UUID]
     bridge.register.assert_awaited_once()

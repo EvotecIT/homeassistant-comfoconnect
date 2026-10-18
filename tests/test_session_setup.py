@@ -8,15 +8,16 @@ import pytest
 from aiocomfoconnect.exceptions import AioComfoConnectTimeout, ComfoConnectRmiError
 from custom_components.comfoconnect import DOMAIN, async_setup_entry
 from custom_components.comfoconnect.const import CONF_LOCAL_UUID, CONF_UUID
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
 
 @pytest.mark.parametrize("error", [ComfoConnectRmiError("Busy"), AioComfoConnectTimeout("Timed out")])
-def test_failed_device_read_closes_session_and_requests_retry(error):
+def test_failed_device_read_closes_session_and_requests_retry(error, tmp_path):
     """A connected bridge cannot survive a recoverable setup read failure."""
 
     async def scenario():
-        hass = SimpleNamespace(loop=asyncio.get_running_loop(), data={})
+        hass = HomeAssistant(str(tmp_path))
         entry = SimpleNamespace(
             entry_id="entry", data={"host": "127.0.0.1", CONF_UUID: "bridge", CONF_LOCAL_UUID: "local"}, options={}, add_update_listener=Mock()
         )
@@ -32,11 +33,11 @@ def test_failed_device_read_closes_session_and_requests_retry(error):
     asyncio.run(scenario())
 
 
-def test_cancelled_setup_read_closes_session_and_propagates_cancellation():
+def test_cancelled_setup_read_closes_session_and_propagates_cancellation(tmp_path):
     """Stopping setup releases its connection without converting cancellation to retry."""
 
     async def scenario():
-        hass = SimpleNamespace(loop=asyncio.get_running_loop(), data={})
+        hass = HomeAssistant(str(tmp_path))
         entry = SimpleNamespace(
             entry_id="entry", data={"host": "127.0.0.1", CONF_UUID: "bridge", CONF_LOCAL_UUID: "local"}, options={}, add_update_listener=Mock()
         )

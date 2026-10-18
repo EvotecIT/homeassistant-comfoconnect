@@ -60,7 +60,7 @@ Open **Settings → Devices & services → Zehnder ComfoAir Q → Configure** an
 * **Faults only**: notify about alarms other than filter maintenance reminders.
 * **Faults and maintenance**: include filter ordering, cleaning, and replacement reminders. Maintenance appears in its own section and has a maintenance title when no faults are active.
 
-Existing installations keep **Faults and maintenance** when upgrading. New installations default to **Off**. Changing the option applies immediately without reconnecting the bridge.
+Native notifications default to **Off** for every installation. Enable **Faults only** or **Faults and maintenance** to receive notifications. Changing the option applies immediately without reconnecting the bridge.
 
 Each ventilation unit has one persistent notification combining its nodes. Repeated reports do not recreate a dismissed notice; a change to the selected alarms can notify again. Dismissal and known node alarms survive an integration reload. A Home Assistant restart starts a fresh alarm session. An alarm recheck does not create a notification or confirm that an earlier alarm has cleared; a confirmed clear removes it once no selected alarms remain.
 
